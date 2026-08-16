@@ -1,0 +1,28 @@
+[Unit]
+Description=Codex Bridge Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codexrelay
+Group=codexrelay
+WorkingDirectory=/opt/codex-bridge-relay
+EnvironmentFile=/etc/codex-bridge-relay.env
+Environment=PATH=/opt/codex-bridge-node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/codex-bridge-node/bin/node relay/entrypoint.mjs
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

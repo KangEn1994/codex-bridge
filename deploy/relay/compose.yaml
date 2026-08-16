@@ -1,0 +1,23 @@
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/relay/Dockerfile
+    container_name: codex-bridge-relay
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      CODEX_RELAY_WEB_PORT: "3000"
+      CODEX_RELAY_WEB_INTERNAL_URL: "http://127.0.0.1:3000"
+      CODEX_RELAY_TRUST_PROXY: "true"
+    ports:
+      - "127.0.0.1:43120:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/relay/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

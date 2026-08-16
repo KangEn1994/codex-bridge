@@ -1,0 +1,12 @@
+.git
+.next
+.vinext
+.wrangler
+.tools
+android/.gradle
+android/app/build
+node_modules
+dist
+.logs
+*.log
+*.tsbuildinfo
