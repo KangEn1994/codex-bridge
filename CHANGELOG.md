@@ -6,6 +6,15 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-16
+
+### Changed
+
+- Replaced the legacy Android first-run dialog with an offline Compose connection screen matching the in-app pairing experience.
+- Kept QR scanning as the primary action and added a collapsible manual server and optional-token path.
+- Deferred Android notification permission until the first Bridge page loads, so system permissions no longer cover the connection screen on launch.
+- Made debug APKs install alongside the signed release app for safer physical-device testing.
+
 ## [0.6.2] - 2026-08-16
 
 ### Fixed

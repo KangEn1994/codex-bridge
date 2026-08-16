@@ -1,7 +1,6 @@
 package com.codexbridge.mobile;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -13,6 +12,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -30,7 +30,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.ValueCallback;
 import android.provider.MediaStore;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
@@ -56,17 +55,20 @@ public final class MainActivity extends Activity {
     private static final String PREFERENCES = "codex_bridge";
     private static final String URL_KEY = "bridge_url";
     private static final String WEBVIEW_VERSION_KEY = "webview_version";
+    private static final String NOTIFICATION_PERMISSION_ASKED_KEY = "notification_permission_asked";
     private static final String NOTIFICATION_CHANNEL = "codex_events";
     private static final int CONNECTION_NOTIFICATION_ID = 4101;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 42;
     private static final int SCANNER_REQUEST = 74;
     private static final int IMAGE_PICKER_REQUEST = 75;
+    private static final int CONNECTION_REQUEST = 76;
     private static final int NATIVE_BRIDGE_PROTOCOL = 1;
     private static final String NATIVE_MESSAGE_OBJECT = "CodexBridgeNative";
 
     private WebView webView;
     private String bridgeUrl;
     private boolean settingsVisible;
+    private boolean mainFrameLoadFailed;
     private boolean nativeMessageBridgeInstalled;
     private ValueCallback<Uri[]> pendingFileCallback;
 
@@ -100,7 +102,7 @@ public final class MainActivity extends Activity {
 
         setContentView(root);
         ViewCompat.requestApplyInsets(root);
-        configureNotifications();
+        configureNotificationChannel();
         configureWebView();
         refreshWebShellAfterNativeUpgrade();
         String launchUrl = resolveLaunchUrl(getIntent());
@@ -119,7 +121,7 @@ public final class MainActivity extends Activity {
 
     private void loadBridgeOrShowPairing(String launchUrl) {
         if (normalizeUrl(launchUrl) == null) {
-            webView.post(() -> showSettingsDialog(false));
+            webView.post(() -> showConnectionScreen());
             return;
         }
         webView.loadUrl(versionedLaunchUrl(launchUrl));
@@ -216,6 +218,20 @@ public final class MainActivity extends Activity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                mainFrameLoadFailed = false;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                String normalizedBridge = normalizeUrl(bridgeUrl);
+                if (!mainFrameLoadFailed && normalizedBridge != null &&
+                    sameOrigin(Uri.parse(normalizedBridge), Uri.parse(url))) {
+                    requestNotificationPermissionIfNeeded();
+                }
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri target = request.getUrl();
                 if (sameOrigin(Uri.parse(bridgeUrl), target)) return false;
@@ -230,8 +246,9 @@ public final class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
+                    mainFrameLoadFailed = true;
                     Toast.makeText(MainActivity.this, R.string.page_unavailable, Toast.LENGTH_LONG).show();
-                    view.postDelayed(() -> showSettingsDialog(true), 250);
+                    view.postDelayed(() -> showConnectionScreen(), 250);
                 }
             }
 
@@ -420,16 +437,24 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void configureNotifications() {
+    private void configureNotificationChannel() {
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         manager.createNotificationChannel(new NotificationChannel(
             NOTIFICATION_CHANNEL,
             "Codex 任务",
             NotificationManager.IMPORTANCE_DEFAULT
         ));
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
-        }
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return;
+        if (getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+            .getBoolean(NOTIFICATION_PERMISSION_ASKED_KEY, false)) return;
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+            .putBoolean(NOTIFICATION_PERMISSION_ASKED_KEY, true)
+            .apply();
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
     }
 
     private void showNotification(String title, String body, String threadId) {
@@ -474,6 +499,24 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == CONNECTION_REQUEST) {
+            settingsVisible = false;
+            if (resultCode == RESULT_OK && data != null) {
+                String scan = value(data.getStringExtra(ConnectionActivity.RESULT_SCAN));
+                if (!scan.isEmpty()) {
+                    handleScannedPairing(scan);
+                    return;
+                }
+                String server = value(data.getStringExtra(ConnectionActivity.RESULT_SERVER));
+                String token = value(data.getStringExtra(ConnectionActivity.RESULT_TOKEN));
+                if (connectToBridge(server, token)) return;
+                Toast.makeText(this, R.string.invalid_url, Toast.LENGTH_LONG).show();
+                webView.post(() -> showConnectionScreen());
+                return;
+            }
+            if (normalizeUrl(bridgeUrl) == null) finish();
+            return;
+        }
         if (requestCode == IMAGE_PICKER_REQUEST) {
             ValueCallback<Uri[]> callback = pendingFileCallback;
             pendingFileCallback = null;
@@ -499,6 +542,32 @@ public final class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private boolean connectToBridge(String rawServer, String rawToken) {
+        String server = normalizeUrl(rawServer);
+        String token = value(rawToken).trim();
+        if (server == null || (!token.isEmpty() && token.length() < 20)) return false;
+        bridgeUrl = server;
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putString(URL_KEY, bridgeUrl).apply();
+        configureNativeMessageBridge();
+        if (token.isEmpty()) {
+            webView.loadUrl(versionedLaunchUrl(bridgeUrl));
+            return true;
+        }
+        try {
+            JSONObject pairing = new JSONObject()
+                .put("server", server)
+                .put("token", token);
+            String payload = Base64.encodeToString(
+                pairing.toString().getBytes(StandardCharsets.UTF_8),
+                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING
+            );
+            webView.loadUrl(pairingLaunchUrl(bridgeUrl, payload));
+            return true;
+        } catch (JSONException error) {
+            return false;
+        }
     }
 
     private void handleScannedPairing(String raw) {
@@ -547,52 +616,20 @@ public final class MainActivity extends Activity {
         return value == null ? "" : value;
     }
 
-    private void showSettingsDialog(boolean showRetry) {
+    private void showConnectionScreen() {
         if (isFinishing() || settingsVisible) return;
         settingsVisible = true;
         boolean requiresConnection = normalizeUrl(bridgeUrl) == null;
-
-        FrameLayout container = new FrameLayout(this);
-        int spacing = dp(20);
-        container.setPadding(spacing, dp(6), spacing, 0);
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setHint(R.string.bridge_url_hint);
-        input.setText(bridgeUrl);
-        input.setSelectAllOnFocus(true);
-        container.addView(input, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-            .setTitle(R.string.connection_settings)
-            .setMessage(R.string.bridge_url_help)
-            .setView(container)
-            .setNeutralButton(R.string.scan_pairing, (current, which) -> startPairingScan())
-            .setPositiveButton(R.string.save_and_connect, null);
-        if (showRetry) {
-            builder.setNegativeButton(R.string.retry, (current, which) -> webView.reload());
-        } else if (!requiresConnection) {
-            builder.setNegativeButton(android.R.string.cancel, null);
+        Intent intent = new Intent(this, ConnectionActivity.class)
+            .putExtra(ConnectionActivity.EXTRA_CURRENT_SERVER, value(bridgeUrl));
+        try {
+            startActivityForResult(intent, CONNECTION_REQUEST);
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        } catch (RuntimeException error) {
+            settingsVisible = false;
+            Toast.makeText(this, R.string.connection_screen_failed, Toast.LENGTH_LONG).show();
+            if (requiresConnection) finish();
         }
-        AlertDialog dialog = builder.create();
-        dialog.setCancelable(!requiresConnection);
-        dialog.setCanceledOnTouchOutside(!requiresConnection);
-        dialog.setOnDismissListener(current -> settingsVisible = false);
-        dialog.setOnShowListener(current -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-            String normalized = normalizeUrl(input.getText().toString());
-            if (normalized == null) {
-                input.setError(getString(R.string.invalid_url));
-                return;
-            }
-            bridgeUrl = normalized;
-            getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putString(URL_KEY, bridgeUrl).apply();
-            dialog.dismiss();
-            configureNativeMessageBridge();
-            webView.loadUrl(versionedLaunchUrl(bridgeUrl));
-        }));
-        dialog.show();
     }
 
     private String normalizeUrl(String candidate) {
@@ -609,10 +646,6 @@ public final class MainActivity extends Activity {
         } catch (URISyntaxException error) {
             return null;
         }
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     @Override

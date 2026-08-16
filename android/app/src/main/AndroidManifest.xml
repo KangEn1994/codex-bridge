@@ -33,6 +33,11 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".ConnectionActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".ImageViewerActivity"
             android:exported="false"
             android:screenOrientation="unspecified"
