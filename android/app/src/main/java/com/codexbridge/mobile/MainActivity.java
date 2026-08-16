@@ -104,7 +104,7 @@ public final class MainActivity extends Activity {
         refreshWebShellAfterNativeUpgrade();
         String launchUrl = resolveLaunchUrl(getIntent());
         configureNativeMessageBridge();
-        webView.loadUrl(versionedLaunchUrl(launchUrl));
+        loadBridgeOrShowPairing(launchUrl);
     }
 
     @Override
@@ -113,6 +113,14 @@ public final class MainActivity extends Activity {
         setIntent(intent);
         String launchUrl = resolveLaunchUrl(intent);
         configureNativeMessageBridge();
+        loadBridgeOrShowPairing(launchUrl);
+    }
+
+    private void loadBridgeOrShowPairing(String launchUrl) {
+        if (normalizeUrl(launchUrl) == null) {
+            webView.post(() -> showSettingsDialog(false));
+            return;
+        }
         webView.loadUrl(versionedLaunchUrl(launchUrl));
     }
 
@@ -532,6 +540,7 @@ public final class MainActivity extends Activity {
     private void showSettingsDialog(boolean showRetry) {
         if (isFinishing() || settingsVisible) return;
         settingsVisible = true;
+        boolean requiresConnection = normalizeUrl(bridgeUrl) == null;
 
         FrameLayout container = new FrameLayout(this);
         int spacing = dp(20);
@@ -546,15 +555,20 @@ public final class MainActivity extends Activity {
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
             .setTitle(R.string.connection_settings)
             .setMessage(R.string.bridge_url_help)
             .setView(container)
-            .setNegativeButton(showRetry ? R.string.retry : android.R.string.cancel, (current, which) -> {
-                if (showRetry) webView.reload();
-            })
-            .setPositiveButton(R.string.save_and_connect, null)
-            .create();
+            .setNeutralButton(R.string.scan_pairing, (current, which) -> startPairingScan())
+            .setPositiveButton(R.string.save_and_connect, null);
+        if (showRetry) {
+            builder.setNegativeButton(R.string.retry, (current, which) -> webView.reload());
+        } else if (!requiresConnection) {
+            builder.setNegativeButton(android.R.string.cancel, null);
+        }
+        AlertDialog dialog = builder.create();
+        dialog.setCancelable(!requiresConnection);
+        dialog.setCanceledOnTouchOutside(!requiresConnection);
         dialog.setOnDismissListener(current -> settingsVisible = false);
         dialog.setOnShowListener(current -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             String normalized = normalizeUrl(input.getText().toString());
@@ -566,7 +580,7 @@ public final class MainActivity extends Activity {
             getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putString(URL_KEY, bridgeUrl).apply();
             dialog.dismiss();
             configureNativeMessageBridge();
-            webView.loadUrl(bridgeUrl);
+            webView.loadUrl(versionedLaunchUrl(bridgeUrl));
         }));
         dialog.show();
     }

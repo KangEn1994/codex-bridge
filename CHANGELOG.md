@@ -6,6 +6,18 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-16
+
+### Fixed
+
+- Prevented the Android release app from opening a blank screen when no default Bridge URL was embedded.
+- Added a mandatory first-run connection dialog with QR pairing and manual URL options.
+- Set the official Android release workflow to use the public Bridge web URL by default.
+
+## [0.5.5] - 2026-08-16
+
+- Initial open-source preview.
+
 ### Security
 
 - Prepared release signing through external secrets instead of the Android debug key.
@@ -15,7 +27,3 @@ The project follows semantic versioning where practical. While the project is be
 ### Fixed
 
 - Added `PATCH` support to the local API proxy used for run configuration and queue updates.
-
-## [0.5.5] - Unreleased
-
-- Initial open-source preview.

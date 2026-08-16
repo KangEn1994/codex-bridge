@@ -5,6 +5,7 @@
     <string name="bridge_url_hint">https://bridge.example.com</string>
     <string name="bridge_url_help">填写电脑上的 Codex Bridge 地址。通过 Linker 组网时可以直接使用 HTTP 地址。</string>
     <string name="save_and_connect">保存并连接</string>
+    <string name="scan_pairing">扫码配对</string>
     <string name="retry">重试</string>
     <string name="invalid_url">请输入有效的 http:// 或 https:// 地址</string>
     <string name="page_unavailable">无法连接电脑，请检查网络和服务地址。</string>
