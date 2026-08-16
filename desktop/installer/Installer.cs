@@ -10,7 +10,7 @@ namespace CodexBridge.Setup
 {
     internal static class Installer
     {
-        private const string ProductVersion = "0.6.0";
+        private const string ProductVersion = "0.6.1";
         private const string PayloadName = "CodexBridge.Payload.zip";
 
         [STAThread]
@@ -43,7 +43,7 @@ namespace CodexBridge.Setup
 
                 MessageBox.Show(
                     "Codex Bridge is ready.\r\n\r\n" +
-                    "Use its tray icon to choose LAN / private-network access and copy the phone address.",
+                    "Use its tray icon to choose local, Linker / Tailscale, or public relay access.",
                     "Codex Bridge Setup",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -114,10 +114,14 @@ namespace CodexBridge.Setup
 
         private static void StopExistingTray()
         {
-            foreach (Process process in Process.GetProcessesByName("CodexBridge.Tray"))
+            string[] names = { "CodexBridge", "CodexBridge.Tray" };
+            foreach (string name in names)
             {
-                try { process.Kill(); process.WaitForExit(5000); }
-                catch { }
+                foreach (Process process in Process.GetProcessesByName(name))
+                {
+                    try { process.Kill(); process.WaitForExit(5000); }
+                    catch { }
+                }
             }
         }
 

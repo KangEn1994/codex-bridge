@@ -6,6 +6,23 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-16
+
+### Added
+
+- Added a first-class public relay mode to the Windows connection dialog, including HTTPS validation, relay server probing, and separate Host/Phone credentials.
+- Added a download-ready `CodexBridge-Relay-Deploy.zip` artifact with Docker Compose, Windows/Linux credential generators, and deployment guidance.
+
+### Changed
+
+- Simplified the tray menu by grouping Bridge controls, diagnostics, and exit actions into submenus.
+- Renamed the private overlay-network guidance to Linker / Tailscale and made the copied mobile address follow the active connection mode.
+- Public relay mode now keeps the Windows Host bound to loopback and uses only an outbound WSS connection.
+
+### Fixed
+
+- Setup and uninstall now stop both installed and portable tray executable names, preventing an older tray process from retaining the single-instance lock.
+
 ## [0.6.0] - 2026-08-16
 
 ### Added

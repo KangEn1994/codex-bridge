@@ -34,6 +34,21 @@ namespace CodexBridge.Tray
         public DateTime CheckedAt;
     }
 
+    internal sealed class RelayConfiguration
+    {
+        public string PublicUrl = "";
+        public string HostToken = "";
+        public string PhoneToken = "";
+        public bool IsConfigured
+        {
+            get
+            {
+                return !string.IsNullOrWhiteSpace(PublicUrl) &&
+                    HostToken.Length >= 32 && PhoneToken.Length >= 32;
+            }
+        }
+    }
+
     internal sealed class BridgeSupervisor : IDisposable
     {
         private readonly string projectRoot;
@@ -61,6 +76,8 @@ namespace CodexBridge.Tray
         public int LocalApiPort { get { return ReadLauncherConfig().ApiPort; } }
         public string CurrentListenAddress { get { return ReadLauncherConfig().ListenAddress; } }
         public string CurrentPublicUrl { get { return ReadLauncherConfig().PublicUrl; } }
+        public RelayConfiguration CurrentRelayConfiguration { get { return ReadRelayConfiguration(); } }
+        public string CurrentMobileUrl { get { return ReadEffectiveMobileUrl(); } }
 
         public BridgeSupervisor(string projectRoot)
         {
@@ -103,7 +120,7 @@ namespace CodexBridge.Tray
                 Publish(new BridgeSnapshot
                 {
                     State = BridgeState.Stopped,
-                    PublicUrl = ReadLauncherConfig().PublicUrl,
+                    PublicUrl = ReadEffectiveMobileUrl(),
                     Detail = "已由用户停止",
                     CheckedAt = DateTime.Now
                 });
@@ -118,10 +135,15 @@ namespace CodexBridge.Tray
             return RunRecoveryAsync(true, reason, true);
         }
 
-        public Task SaveNetworkConfigurationAsync(string listenAddress, string publicUrl)
+        public Task SaveConnectionConfigurationAsync(NetworkSettingsResult settings)
         {
+            if (settings == null) throw new ArgumentNullException("settings");
+            string listenAddress = settings.ListenAddress;
+            string publicUrl = settings.PublicUrl;
             if (listenAddress != "127.0.0.1" && listenAddress != "0.0.0.0")
                 throw new ArgumentException("Listen address must be local-only or all network adapters.");
+            if (settings.Mode == ConnectionMode.Relay && listenAddress != "127.0.0.1")
+                throw new ArgumentException("Public relay mode must keep the local Host bound to loopback.");
             Uri parsed;
             if (!Uri.TryCreate(publicUrl, UriKind.Absolute, out parsed) ||
                 (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
@@ -136,12 +158,36 @@ namespace CodexBridge.Tray
                 { "webPort", current.WebPort },
                 { "listenAddress", listenAddress }
             };
-            File.WriteAllText(
-                Path.Combine(configDirectory, "launcher.json"),
-                json.Serialize(value),
-                new UTF8Encoding(false));
-            Log("network_configuration_saved", listenAddress + " " + publicUrl);
-            return RestartBridgeAsync("network-configuration-changed");
+            Dictionary<string, object> relayValue = null;
+            string relayPath = Path.Combine(configDirectory, "relay.json");
+            if (settings.Mode == ConnectionMode.Relay)
+            {
+                Uri relayUri;
+                if (!Uri.TryCreate(settings.RelayPublicUrl, UriKind.Absolute, out relayUri) ||
+                    (relayUri.Scheme != Uri.UriSchemeHttps && !relayUri.IsLoopback) ||
+                    !string.IsNullOrEmpty(relayUri.Query) || !string.IsNullOrEmpty(relayUri.Fragment) ||
+                    relayUri.AbsolutePath != "/")
+                    throw new ArgumentException("Relay address must be an HTTPS site root URL.");
+                if ((settings.RelayHostToken ?? "").Trim().Length < 32 ||
+                    (settings.RelayPhoneToken ?? "").Trim().Length < 32)
+                    throw new ArgumentException("Relay tokens must contain at least 32 characters.");
+                relayValue = new Dictionary<string, object>
+                {
+                    { "publicUrl", settings.RelayPublicUrl.TrimEnd('/') },
+                    { "hostToken", settings.RelayHostToken.Trim() },
+                    { "phoneToken", settings.RelayPhoneToken.Trim() }
+                };
+            }
+
+            WriteJsonAtomic(Path.Combine(configDirectory, "launcher.json"), value);
+            if (relayValue != null) WriteJsonAtomic(relayPath, relayValue);
+            else if (File.Exists(relayPath))
+            {
+                File.Delete(relayPath);
+            }
+
+            Log("connection_configuration_saved", settings.Mode + " " + settings.MobileUrl);
+            return RestartBridgeAsync("connection-configuration-changed");
         }
 
         public void CheckNow()
@@ -167,7 +213,7 @@ namespace CodexBridge.Tray
                 Publish(new BridgeSnapshot
                 {
                     State = BridgeState.Stopped,
-                    PublicUrl = ReadLauncherConfig().PublicUrl,
+                    PublicUrl = ReadEffectiveMobileUrl(),
                     Detail = "已停止；可从托盘菜单重新启动",
                     CheckedAt = DateTime.Now
                 });
@@ -200,7 +246,7 @@ namespace CodexBridge.Tray
                 RelayReachable = !relayConfigured || hostRelayConnected == true || relay.Success,
                 RelayConnected = !relayConfigured || (hostRelayConnected ?? relayConnected),
                 RelayConfigured = relayConfigured,
-                PublicUrl = config.PublicUrl,
+                PublicUrl = relayConfigured ? relayUrl : config.PublicUrl,
                 CheckedAt = DateTime.Now
             };
 
@@ -210,7 +256,9 @@ namespace CodexBridge.Tray
                 snapshot.State = BridgeState.Online;
                 snapshot.Detail = relayConfigured
                     ? "电脑、Codex 和公网中继均正常"
-                    : "电脑和 Codex 均正常，当前使用直连模式";
+                    : (config.ListenAddress == "0.0.0.0"
+                        ? "电脑和 Codex 均正常，当前使用局域网 / Linker / Tailscale"
+                        : "电脑和 Codex 均正常，当前仅本机连接");
                 localFailureCount = 0;
                 recoveryDelaySeconds = 15;
             }
@@ -310,7 +358,7 @@ namespace CodexBridge.Tray
         private void PublishStarting(string detail)
         {
             LauncherConfig config = ReadLauncherConfig();
-            Publish(new BridgeSnapshot { State = BridgeState.Starting, PublicUrl = config.PublicUrl, Detail = detail, CheckedAt = DateTime.Now });
+            Publish(new BridgeSnapshot { State = BridgeState.Starting, PublicUrl = ReadEffectiveMobileUrl(), Detail = detail, CheckedAt = DateTime.Now });
         }
 
         private void Publish(BridgeSnapshot snapshot)
@@ -355,14 +403,47 @@ namespace CodexBridge.Tray
 
         private string ReadRelayPublicUrl()
         {
+            RelayConfiguration relay = ReadRelayConfiguration();
+            return relay.IsConfigured ? relay.PublicUrl : "";
+        }
+
+        private RelayConfiguration ReadRelayConfiguration()
+        {
+            var result = new RelayConfiguration();
             try
             {
                 string path = Path.Combine(configDirectory, "relay.json");
-                if (!File.Exists(path)) return "";
+                if (!File.Exists(path)) return result;
                 var value = json.DeserializeObject(File.ReadAllText(path)) as Dictionary<string, object>;
-                return value == null ? "" : DictionaryString(value, "publicUrl", "");
+                if (value == null) return result;
+                result.PublicUrl = DictionaryString(value, "publicUrl", "").TrimEnd('/');
+                result.HostToken = DictionaryString(value, "hostToken", "");
+                result.PhoneToken = DictionaryString(value, "phoneToken", "");
             }
-            catch { return ""; }
+            catch (Exception ex) { Log("relay_config_error", ex.Message); }
+            return result;
+        }
+
+        private string ReadEffectiveMobileUrl()
+        {
+            RelayConfiguration relay = ReadRelayConfiguration();
+            return relay.IsConfigured ? relay.PublicUrl : ReadLauncherConfig().PublicUrl;
+        }
+
+        private void WriteJsonAtomic(string path, object value)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            string temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllText(temporary, json.Serialize(value), new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
         }
 
         private bool LoadEnabledState()

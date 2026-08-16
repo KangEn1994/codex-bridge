@@ -39,29 +39,34 @@ namespace CodexBridge.Tray
             menu = new ContextMenuStrip();
             menu.Items.Add(statusItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("打开手机管理页面", null, delegate { OpenUrl(supervisor.LastSnapshot.PublicUrl); }));
-            menu.Items.Add(new ToolStripMenuItem("打开配对二维码", null, delegate { OpenUrl("http://127.0.0.1:43110/setup"); }));
-            menu.Items.Add(new ToolStripMenuItem("复制公网地址", null, delegate { CopyPublicUrl(); }));
-            menu.Items.Add(new ToolStripMenuItem("查看详细状态", null, delegate { ShowStatus(); }));
-            menu.Items.Add(new ToolStripMenuItem("打开日志目录", null, delegate { OpenPath(Path.Combine(projectRoot, ".logs")); }));
-            menu.Items.Add(new ToolStripMenuItem("查看托盘守护日志", null, delegate { OpenFile(Path.Combine(configDirectory, "tray.log")); }));
+            menu.Items.Add(new ToolStripMenuItem("打开手机管理", null, delegate { OpenUrl(supervisor.LastSnapshot.PublicUrl); }));
+            menu.Items.Add(new ToolStripMenuItem("手机连接…", null, async delegate { await ShowNetworkSettingsAsync(); }));
+            menu.Items.Add(new ToolStripMenuItem("复制手机连接地址", null, delegate { CopyPublicUrl(); }));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(startItem);
-            menu.Items.Add(stopItem);
-            menu.Items.Add(restartItem);
-            menu.Items.Add(new ToolStripMenuItem("立即检查", null, delegate { supervisor.CheckNow(); }));
+
+            var bridgeControl = new ToolStripMenuItem("Bridge 控制");
+            bridgeControl.DropDownItems.Add(startItem);
+            bridgeControl.DropDownItems.Add(stopItem);
+            bridgeControl.DropDownItems.Add(restartItem);
+            bridgeControl.DropDownItems.Add(new ToolStripSeparator());
+            bridgeControl.DropDownItems.Add(new ToolStripMenuItem("立即检查", null, delegate { supervisor.CheckNow(); }));
+            menu.Items.Add(bridgeControl);
+
+            var diagnostics = new ToolStripMenuItem("诊断与日志");
+            diagnostics.DropDownItems.Add(new ToolStripMenuItem("查看详细状态", null, delegate { ShowStatus(); }));
+            diagnostics.DropDownItems.Add(new ToolStripMenuItem("打开运行日志", null, delegate { OpenPath(Path.Combine(projectRoot, ".logs")); }));
+            diagnostics.DropDownItems.Add(new ToolStripMenuItem("查看托盘日志", null, delegate { OpenFile(Path.Combine(configDirectory, "tray.log")); }));
+            menu.Items.Add(diagnostics);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("退出托盘（Bridge 继续运行）", null, delegate { ExitTray(false); }));
-            menu.Items.Add(new ToolStripMenuItem("退出并停止 Bridge", null, async delegate
+
+            var exit = new ToolStripMenuItem("退出");
+            exit.DropDownItems.Add(new ToolStripMenuItem("仅退出托盘", null, delegate { ExitTray(false); }));
+            exit.DropDownItems.Add(new ToolStripMenuItem("退出并停止 Bridge", null, async delegate
             {
                 await supervisor.StopBridgeAsync();
                 ExitTray(true);
             }));
-
-            menu.Items.Insert(4, new ToolStripMenuItem("连接方式与手机地址...", null, async delegate
-            {
-                await ShowNetworkSettingsAsync();
-            }));
+            menu.Items.Add(exit);
 
             currentIcon = StatusIcon.Create(BridgeState.Starting);
             notifyIcon = new NotifyIcon
@@ -134,20 +139,19 @@ namespace CodexBridge.Tray
             using (var dialog = new NetworkSettingsDialog(
                 supervisor.CurrentListenAddress,
                 supervisor.CurrentPublicUrl,
-                supervisor.LocalApiPort))
+                supervisor.LocalApiPort,
+                supervisor.CurrentRelayConfiguration))
             {
                 if (dialog.ShowDialog() != DialogResult.OK || dialog.Result == null) return;
                 await RunActionAsync(delegate
                 {
-                    return supervisor.SaveNetworkConfigurationAsync(
-                        dialog.Result.ListenAddress,
-                        dialog.Result.PublicUrl);
+                    return supervisor.SaveConnectionConfigurationAsync(dialog.Result);
                 });
-                try { Clipboard.SetText(dialog.Result.PublicUrl); }
+                try { Clipboard.SetText(dialog.Result.MobileUrl); }
                 catch { }
                 MessageBox.Show(
-                    "手机地址已复制：\r\n" + dialog.Result.PublicUrl +
-                    "\r\n\r\n请在 Android App 中输入该地址，然后在这台电脑上允许连接请求。",
+                    "手机连接地址已复制：\r\n" + dialog.Result.MobileUrl +
+                    "\r\n\r\n请打开“手机连接…”中的配对二维码，在 Android App 中扫码连接。",
                     "Codex Bridge",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -209,7 +213,7 @@ namespace CodexBridge.Tray
                 "公网中继：" + relay + "\r\n\r\n" +
                 "说明：" + value.Detail + "\r\n" +
                 "检查时间：" + value.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss") + "\r\n" +
-                "公网地址：" + value.PublicUrl;
+                "手机连接地址：" + value.PublicUrl;
             MessageBox.Show(message, "Codex Bridge 状态", MessageBoxButtons.OK,
                 value.State == BridgeState.Offline ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }

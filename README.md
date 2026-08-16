@@ -31,12 +31,14 @@
 
 1. 从 [GitHub Releases](https://github.com/momo-888/codex-bridge/releases) 下载并运行 `CodexBridge-Windows-Setup.exe`。
 2. 从同一 Release 下载 `CodexBridge.apk` 并安装到 Android 手机。
-3. 在 Windows 托盘图标中打开“连接方式与手机地址”，选择局域网或可信异地组网，并复制显示的地址。
+3. 在 Windows 托盘图标中打开“手机连接…”，选择仅本机、局域网 / 异地组网或公网中继，并复制显示的地址。
 4. 在手机输入该地址并发送连接请求；核对托盘弹窗中的设备名与来源 IP 后选择允许。
 
 `CodexBridge-Windows-Portable.zip` 适合不希望安装的用户：解压后直接运行根目录的 `CodexBridge.exe`。Windows 包已经包含运行时；只有源码开发和自行构建才需要 Node.js/npm。
 
-如果手机和电脑不在同一局域网，可以使用 Tailscale、ZeroTier 等可信异地组网的电脑 IP。不要把未加密的 Host 端口直接映射到公网；公网访问应使用自行部署的 HTTPS/WSS Relay。
+如果手机和电脑不在同一局域网，推荐使用 [Linker](https://github.com/snltty/linker) / [Tailscale](https://tailscale.com/) 等可信异地组网的电脑 IP。不要把未加密的 Host 端口直接映射到公网；公网访问应使用自行部署的 HTTPS/WSS Relay。
+
+需要公网中继时，可从同一 Release 下载 `CodexBridge-Relay-Deploy.zip`。部署完成后，在托盘“手机连接…”中选择“公网中继”，填写中继地址、Host Token 和 Phone Token 即可；无需重新编译 Windows 或 Android 客户端。
 
 > [!IMPORTANT]
 > 本项目与 OpenAI 无隶属、合作或背书关系。Codex 和 OpenAI 是其各自权利人的商标。
@@ -56,7 +58,7 @@
 ```text
 Android / PWA
       │
-      ├── trusted overlay HTTP/WS ─────────────┐
+      ├── Linker / Tailscale HTTP/WS ──────────┐
       │                                        │
       └── HTTPS/WSS ── self-hosted Relay ──────┤
                                                ▼
@@ -108,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-startup.ps1
 
 配对页位于 `http://127.0.0.1:43110/setup`。该模式不会接受其他设备的连接。
 
-### 可信异地组网或局域网
+### Linker / Tailscale 异地组网或局域网
 
 下面示例假设电脑在组网中的地址是 `100.64.0.10`：
 
@@ -145,6 +147,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-startup.ps1 `
 ## 自建 Relay
 
 Relay 需要独立的 Host Token 和 Phone Token，两个值都至少包含 32 个随机字符。示例配置位于 [`deploy/relay/.env.example`](deploy/relay/.env.example)。
+
+普通用户可以直接从 GitHub Release 下载 `CodexBridge-Relay-Deploy.zip`，按照包内 `deploy/relay/README.md` 使用 Docker Compose 部署，并在桌面托盘中完成连接配置。下面是源码开发环境中的等价流程。
 
 生成部署包和随机令牌：
 

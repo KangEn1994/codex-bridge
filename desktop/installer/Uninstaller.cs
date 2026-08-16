@@ -21,8 +21,9 @@ namespace CodexBridge.Setup
             try
             {
                 StopBridge();
-                foreach (Process process in Process.GetProcessesByName("CodexBridge.Tray"))
-                    try { process.Kill(); process.WaitForExit(5000); } catch { }
+                foreach (string name in new[] { "CodexBridge", "CodexBridge.Tray" })
+                    foreach (Process process in Process.GetProcessesByName(name))
+                        try { process.Kill(); process.WaitForExit(5000); } catch { }
                 string startup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Codex Bridge.lnk");
                 string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Codex Bridge");
                 if (File.Exists(startup)) File.Delete(startup);
