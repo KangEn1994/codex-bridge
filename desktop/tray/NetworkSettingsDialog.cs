@@ -361,6 +361,9 @@ namespace CodexBridge.Tray
         {
             return Task.Run(delegate
             {
+                // Standalone .NET Framework executables can otherwise default
+                // to TLS 1.0 even when PowerShell and Node use the OS default.
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
                 var request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "GET";
                 request.Timeout = 7000;

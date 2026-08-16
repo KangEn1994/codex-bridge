@@ -515,6 +515,7 @@ namespace CodexBridge.Tray
                 var result = new ProbeResult();
                 try
                 {
+                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
                     var request = (HttpWebRequest)WebRequest.Create(url);
                     request.Method = "GET";
                     request.Timeout = timeoutMs;

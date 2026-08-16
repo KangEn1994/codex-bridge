@@ -6,6 +6,12 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-16
+
+### Fixed
+
+- Explicitly enabled TLS 1.2 for the Windows tray relay probes, preventing a false “could not create SSL/TLS secure channel” result while the Node/WSS relay connection was already healthy.
+
 ## [0.6.1] - 2026-08-16
 
 ### Added
