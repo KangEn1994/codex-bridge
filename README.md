@@ -1,6 +1,29 @@
+<div align="center">
+
+<img src="public/codex-bridge-c.svg" width="96" height="96" alt="Codex Bridge">
+
 # Codex Bridge
 
-![Codex Bridge](public/codex-bridge-c.svg)
+**把运行在 Windows 上的 Codex，带到 Android 手机上。**
+
+在手机上查看任务、继续对话、处理审批和控制运行状态，实际执行仍留在自己的电脑。
+
+[![Release](https://img.shields.io/github/v/release/momo-888/codex-bridge?style=flat-square)](https://github.com/momo-888/codex-bridge/releases/latest)
+[![CI](https://github.com/momo-888/codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/momo-888/codex-bridge/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/momo-888/codex-bridge/total?style=flat-square)](https://github.com/momo-888/codex-bridge/releases)
+[![License](https://img.shields.io/github/license/momo-888/codex-bridge?style=flat-square)](LICENSE)
+
+[⬇️ 下载](https://github.com/momo-888/codex-bridge/releases/latest) · [🚀 快速开始](#下载即用) · [✨ 功能](#功能) · [🛡️ 安全说明](#安全边界)
+
+</div>
+
+<p align="center">
+  <a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" width="31%" alt="Codex Bridge 首页"></a>
+  <a href="docs/screenshots/task.png"><img src="docs/screenshots/task.png" width="31%" alt="Codex Bridge 当前任务"></a>
+  <a href="docs/screenshots/workspaces.png"><img src="docs/screenshots/workspaces.png" width="31%" alt="Codex Bridge 工作区"></a>
+</p>
+
+<p align="center"><sub>首页 · 实时任务与过程更新 · 工作区</sub></p>
 
 ## 下载即用
 
@@ -14,8 +37,6 @@
 `CodexBridge-Windows-Portable.zip` 适合不希望安装的用户：解压后直接运行根目录的 `CodexBridge.exe`。Windows 包已经包含运行时；只有源码开发和自行构建才需要 Node.js/npm。
 
 如果手机和电脑不在同一局域网，可以使用 Tailscale、ZeroTier 等可信异地组网的电脑 IP。不要把未加密的 Host 端口直接映射到公网；公网访问应使用自行部署的 HTTPS/WSS Relay。
-
-Codex Bridge 是一个非官方的 Android/PWA 移动伴侣，用手机查看并继续运行在自己 Windows 电脑上的 Codex 任务。手机不保存 Codex 登录凭据，也不直接调用 OpenAI；请求由配对后的 Windows Host 转交给本机 Codex App Server。
 
 > [!IMPORTANT]
 > 本项目与 OpenAI 无隶属、合作或背书关系。Codex 和 OpenAI 是其各自权利人的商标。
