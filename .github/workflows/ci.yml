@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   web-and-host:
-    runs-on: ubuntu-latest
+    # Host integration and its path fixtures intentionally target Windows.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
