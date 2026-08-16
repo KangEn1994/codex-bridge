@@ -28,6 +28,7 @@ namespace CodexBridge.Tray
         public bool WebUp;
         public bool RelayReachable;
         public bool RelayConnected;
+        public bool RelayConfigured;
         public string PublicUrl = "";
         public string Detail = "";
         public DateTime CheckedAt;
@@ -57,6 +58,9 @@ namespace CodexBridge.Tray
 
         public BridgeSnapshot LastSnapshot { get; private set; }
         public bool Enabled { get { return enabled; } }
+        public int LocalApiPort { get { return ReadLauncherConfig().ApiPort; } }
+        public string CurrentListenAddress { get { return ReadLauncherConfig().ListenAddress; } }
+        public string CurrentPublicUrl { get { return ReadLauncherConfig().PublicUrl; } }
 
         public BridgeSupervisor(string projectRoot)
         {
@@ -114,6 +118,32 @@ namespace CodexBridge.Tray
             return RunRecoveryAsync(true, reason, true);
         }
 
+        public Task SaveNetworkConfigurationAsync(string listenAddress, string publicUrl)
+        {
+            if (listenAddress != "127.0.0.1" && listenAddress != "0.0.0.0")
+                throw new ArgumentException("Listen address must be local-only or all network adapters.");
+            Uri parsed;
+            if (!Uri.TryCreate(publicUrl, UriKind.Absolute, out parsed) ||
+                (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) ||
+                !string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment) ||
+                parsed.AbsolutePath != "/")
+                throw new ArgumentException("Mobile address must be a complete HTTP or HTTPS site address.");
+            LauncherConfig current = ReadLauncherConfig();
+            var value = new Dictionary<string, object>
+            {
+                { "publicUrl", publicUrl.TrimEnd('/') },
+                { "apiPort", current.ApiPort },
+                { "webPort", current.WebPort },
+                { "listenAddress", listenAddress }
+            };
+            File.WriteAllText(
+                Path.Combine(configDirectory, "launcher.json"),
+                json.Serialize(value),
+                new UTF8Encoding(false));
+            Log("network_configuration_saved", listenAddress + " " + publicUrl);
+            return RestartBridgeAsync("network-configuration-changed");
+        }
+
         public void CheckNow()
         {
             QueueCheck();
@@ -169,6 +199,7 @@ namespace CodexBridge.Tray
                 WebUp = web.Success,
                 RelayReachable = !relayConfigured || hostRelayConnected == true || relay.Success,
                 RelayConnected = !relayConfigured || (hostRelayConnected ?? relayConnected),
+                RelayConfigured = relayConfigured,
                 PublicUrl = config.PublicUrl,
                 CheckedAt = DateTime.Now
             };
@@ -177,7 +208,9 @@ namespace CodexBridge.Tray
             if (localHealthy && snapshot.RelayConnected)
             {
                 snapshot.State = BridgeState.Online;
-                snapshot.Detail = "电脑、Codex 和公网中继均正常";
+                snapshot.Detail = relayConfigured
+                    ? "电脑、Codex 和公网中继均正常"
+                    : "电脑和 Codex 均正常，当前使用直连模式";
                 localFailureCount = 0;
                 recoveryDelaySeconds = 15;
             }
@@ -304,7 +337,7 @@ namespace CodexBridge.Tray
 
         private LauncherConfig ReadLauncherConfig()
         {
-            var result = new LauncherConfig { ApiPort = 43110, WebPort = 3000, PublicUrl = "http://127.0.0.1:3000" };
+            var result = new LauncherConfig { ApiPort = 43110, WebPort = 3000, PublicUrl = "http://127.0.0.1:43110", ListenAddress = "127.0.0.1" };
             string path = Path.Combine(configDirectory, "launcher.json");
             try
             {
@@ -314,6 +347,7 @@ namespace CodexBridge.Tray
                 result.ApiPort = DictionaryInt(value, "apiPort", result.ApiPort);
                 result.WebPort = DictionaryInt(value, "webPort", result.WebPort);
                 result.PublicUrl = DictionaryString(value, "publicUrl", result.PublicUrl);
+                result.ListenAddress = DictionaryString(value, "listenAddress", result.ListenAddress);
             }
             catch (Exception ex) { Log("launcher_config_error", ex.Message); }
             return result;
@@ -489,6 +523,7 @@ namespace CodexBridge.Tray
             public int ApiPort;
             public int WebPort;
             public string PublicUrl = "";
+            public string ListenAddress = "127.0.0.1";
         }
     }
 }

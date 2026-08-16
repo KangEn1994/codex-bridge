@@ -14,6 +14,7 @@ import { RelayConnector } from "./relay-connector";
 import { GeneratedImageError, GeneratedImageStore, type GeneratedImageAsset } from "./generated-images";
 import { RunConfigurationError, type RunConfiguration } from "./run-options";
 import { UserAttachmentError, UserAttachmentStore } from "./user-attachments";
+import { PairingRequestError, PairingRequestStore } from "./pairing";
 import {
   ContextReferenceError,
   resolveContextReferences,
@@ -41,6 +42,7 @@ type RequestTrace = {
 const recentRequests: RequestTrace[] = [];
 const eventTickets = new Map<string, number>();
 const pairingCodes = new Map<string, { server: string; token: string; expiresAt: number }>();
+const pairingRequests = new PairingRequestStore();
 
 const configDir = path.join(os.homedir(), ".codex-bridge");
 const configPath = path.join(configDir, "config.json");
@@ -352,6 +354,65 @@ const server = http.createServer(async (request, response) => {
         queue: bridge.getQueue().length,
         approvals: bridge.listApprovals().length,
       });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/pair/requests") {
+      const body = (await readJson(request)) as { deviceName?: string };
+      const created = pairingRequests.create({
+        deviceName: body.deviceName,
+        remoteAddress: request.socket.remoteAddress || "unknown",
+        userAgent: request.headers["user-agent"] || "",
+      });
+      logBridgeEvent("pairing_request_created", {
+        requestId: created.requestId,
+        remoteAddress: request.socket.remoteAddress || "",
+      });
+      json(response, 201, { ...created, hostname: os.hostname() });
+      return;
+    }
+
+    const pairingStatusMatch = url.pathname.match(/^\/api\/pair\/requests\/([^/]+)\/status$/);
+    if (request.method === "GET" && pairingStatusMatch) {
+      const requestId = decodeURIComponent(pairingStatusMatch[1]);
+      const status = pairingRequests.status(requestId, url.searchParams.get("secret") || "");
+      if (!status) {
+        json(response, 404, { error: "Pairing request was not found or has expired" });
+        return;
+      }
+      json(response, 200, {
+        ...status,
+        hostname: os.hostname(),
+        ...(status.status === "approved" ? { token: config.token } : {}),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/pair/requests" && request.method === "GET") {
+      if (!isLoopback(request) || !authorized(request, url, config.token)) {
+        json(response, 403, { error: "Pairing requests can only be reviewed on this computer" });
+        return;
+      }
+      json(response, 200, { data: pairingRequests.listPending() });
+      return;
+    }
+
+    const pairingDecisionMatch = url.pathname.match(/^\/api\/pair\/requests\/([^/]+)\/decision$/);
+    if (request.method === "POST" && pairingDecisionMatch) {
+      if (!isLoopback(request) || !authorized(request, url, config.token)) {
+        json(response, 403, { error: "Pairing requests can only be approved on this computer" });
+        return;
+      }
+      const body = (await readJson(request)) as { decision?: "approve" | "deny" };
+      if (body.decision !== "approve" && body.decision !== "deny")
+        throw new PairingRequestError("A pairing decision is required", 400);
+      const requestId = decodeURIComponent(pairingDecisionMatch[1]);
+      const result = pairingRequests.decide(requestId, body.decision);
+      logBridgeEvent("pairing_request_decided", {
+        requestId,
+        decision: body.decision,
+      });
+      json(response, 200, result);
       return;
     }
 
@@ -692,7 +753,8 @@ const server = http.createServer(async (request, response) => {
       error instanceof GeneratedImageError ||
       error instanceof UserAttachmentError ||
       error instanceof RunConfigurationError ||
-      error instanceof ContextReferenceError
+      error instanceof ContextReferenceError ||
+      error instanceof PairingRequestError
         ? error.status
         : 500,
       {

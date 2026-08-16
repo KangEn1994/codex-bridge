@@ -21,6 +21,7 @@ namespace CodexBridge.Tray
         private readonly ToolStripMenuItem restartItem;
         private readonly Control dispatcher;
         private readonly BridgeSupervisor supervisor;
+        private readonly PairingApprovalMonitor pairingMonitor;
         private Icon currentIcon;
 
         public TrayApplicationContext(string projectRoot)
@@ -57,6 +58,11 @@ namespace CodexBridge.Tray
                 ExitTray(true);
             }));
 
+            menu.Items.Insert(4, new ToolStripMenuItem("连接方式与手机地址...", null, async delegate
+            {
+                await ShowNetworkSettingsAsync();
+            }));
+
             currentIcon = StatusIcon.Create(BridgeState.Starting);
             notifyIcon = new NotifyIcon
             {
@@ -71,6 +77,41 @@ namespace CodexBridge.Tray
             supervisor.SnapshotChanged += OnSnapshotChanged;
             supervisor.NotificationRequested += OnNotificationRequested;
             supervisor.Start();
+            pairingMonitor = new PairingApprovalMonitor(delegate { return supervisor.LocalApiPort; });
+            pairingMonitor.RequestReceived += OnPairingRequestReceived;
+            pairingMonitor.Start();
+        }
+
+        private void OnPairingRequestReceived(PairingRequestInfo request)
+        {
+            if (dispatcher.IsDisposed) return;
+            dispatcher.BeginInvoke((Action)async delegate
+            {
+                string deviceName = string.IsNullOrWhiteSpace(request.DeviceName) ? "Android 设备" : request.DeviceName;
+                string remoteAddress = string.IsNullOrWhiteSpace(request.RemoteAddress) ? "未知" : request.RemoteAddress;
+                DialogResult decision = MessageBox.Show(
+                    "设备：" + deviceName + "\r\n" +
+                    "来源 IP：" + remoteAddress + "\r\n\r\n" +
+                    "是否允许此设备控制这台电脑上的 Codex？\r\n" +
+                    "请只允许你认识的设备。",
+                    "Codex Bridge 连接请求",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2,
+                    MessageBoxOptions.DefaultDesktopOnly);
+                try
+                {
+                    await pairingMonitor.DecideAsync(request.Id, decision == DialogResult.Yes);
+                    notifyIcon.BalloonTipTitle = decision == DialogResult.Yes ? "设备已连接" : "已拒绝连接";
+                    notifyIcon.BalloonTipText = deviceName;
+                    notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+                    notifyIcon.ShowBalloonTip(3000);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Codex Bridge", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            });
         }
 
         private async Task RunActionAsync(Func<Task> action)
@@ -85,6 +126,31 @@ namespace CodexBridge.Tray
             {
                 SetActionsEnabled(true);
                 supervisor.CheckNow();
+            }
+        }
+
+        private async Task ShowNetworkSettingsAsync()
+        {
+            using (var dialog = new NetworkSettingsDialog(
+                supervisor.CurrentListenAddress,
+                supervisor.CurrentPublicUrl,
+                supervisor.LocalApiPort))
+            {
+                if (dialog.ShowDialog() != DialogResult.OK || dialog.Result == null) return;
+                await RunActionAsync(delegate
+                {
+                    return supervisor.SaveNetworkConfigurationAsync(
+                        dialog.Result.ListenAddress,
+                        dialog.Result.PublicUrl);
+                });
+                try { Clipboard.SetText(dialog.Result.PublicUrl); }
+                catch { }
+                MessageBox.Show(
+                    "手机地址已复制：\r\n" + dialog.Result.PublicUrl +
+                    "\r\n\r\n请在 Android App 中输入该地址，然后在这台电脑上允许连接请求。",
+                    "Codex Bridge",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
         }
 
@@ -133,7 +199,8 @@ namespace CodexBridge.Tray
         private void ShowStatus()
         {
             BridgeSnapshot value = supervisor.LastSnapshot;
-            string relay = value.RelayConnected ? "已连接" : (value.RelayReachable ? "正在重连" : "不可达");
+            string relay = !value.RelayConfigured ? "未启用（直连）" :
+                (value.RelayConnected ? "已连接" : (value.RelayReachable ? "正在重连" : "不可达"));
             string message =
                 "状态：" + ShortState(value.State) + "\r\n\r\n" +
                 "电脑 Host：" + YesNo(value.ApiUp) + "\r\n" +
@@ -200,6 +267,7 @@ namespace CodexBridge.Tray
             try { File.WriteAllText(Path.Combine(configDirectory, "tray.stop.requested"), DateTime.Now.ToString("o")); }
             catch { }
             supervisor.Dispose();
+            pairingMonitor.Dispose();
             notifyIcon.Visible = false;
             notifyIcon.Dispose();
             if (currentIcon != null) currentIcon.Dispose();
@@ -212,6 +280,7 @@ namespace CodexBridge.Tray
             if (disposing)
             {
                 supervisor.Dispose();
+                pairingMonitor.Dispose();
                 notifyIcon.Dispose();
                 menu.Dispose();
                 dispatcher.Dispose();

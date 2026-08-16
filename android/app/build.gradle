@@ -24,8 +24,8 @@ android {
         applicationId "com.codexbridge.mobile"
         minSdk 26
         targetSdk 35
-        versionCode 17
-        versionName "0.5.6"
+        versionCode 18
+        versionName "0.6.0"
         def configuredBridgeUrl = project.findProperty("bridgeUrl") ?: ""
         buildConfigField "String", "DEFAULT_BRIDGE_URL", '"' + configuredBridgeUrl + '"'
     }

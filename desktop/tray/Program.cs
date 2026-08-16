@@ -41,7 +41,9 @@ namespace CodexBridge.Tray
                     return Path.GetFullPath(Environment.ExpandEnvironmentVariables(args[index + 1]));
             }
 
-            string inferred = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", ".."));
+            string inferred = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+            if (File.Exists(Path.Combine(inferred, "scripts", "start-codex-bridge.ps1"))) return inferred;
+            inferred = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", ".."));
             if (File.Exists(Path.Combine(inferred, "scripts", "start-codex-bridge.ps1"))) return inferred;
             return Environment.CurrentDirectory;
         }

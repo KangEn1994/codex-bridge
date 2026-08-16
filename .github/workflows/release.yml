@@ -1,0 +1,99 @@
+name: Release Codex Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.6.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build Windows Setup and portable package
+        shell: powershell
+        run: .\scripts\build-windows-release.ps1 -OutputDirectory .\release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            release/CodexBridge-Windows-Setup.exe
+            release/CodexBridge-Windows-Portable.zip
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      CODEX_BRIDGE_KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
+      CODEX_BRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      CODEX_BRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      CODEX_BRIDGE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate release secrets
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          test -n "$CODEX_BRIDGE_KEYSTORE_PASSWORD"
+          test -n "$CODEX_BRIDGE_KEY_ALIAS"
+          test -n "$CODEX_BRIDGE_KEY_PASSWORD"
+      - name: Build generic signed APK
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$CODEX_BRIDGE_KEYSTORE_PATH"
+          chmod +x android/gradlew
+          ./android/gradlew -p android clean :app:assembleRelease -PbridgeUrl=
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/CodexBridge.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: release/CodexBridge.apk
+          if-no-files-found: error
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$CODEX_BRIDGE_KEYSTORE_PATH"
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-release"
+          merge-multiple: true
+          path: release
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum CodexBridge-Windows-Setup.exe CodexBridge-Windows-Portable.zip CodexBridge.apk > SHA256SUMS.txt
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          gh release create "$RELEASE_TAG"
+          release/CodexBridge-Windows-Setup.exe
+          release/CodexBridge-Windows-Portable.zip
+          release/CodexBridge.apk
+          release/SHA256SUMS.txt
+          --target "$GITHUB_SHA"
+          --title "$RELEASE_TAG"
+          --generate-notes

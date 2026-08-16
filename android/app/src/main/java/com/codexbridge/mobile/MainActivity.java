@@ -47,6 +47,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Locale;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -243,6 +244,15 @@ public final class MainActivity extends Activity {
     }
 
     private final class NativeBridge {
+        @JavascriptInterface
+        public String getDeviceName() {
+            String manufacturer = value(Build.MANUFACTURER).trim();
+            String model = value(Build.MODEL).trim();
+            if (manufacturer.isEmpty()) return model.isEmpty() ? "Android device" : model;
+            if (model.toLowerCase(Locale.ROOT).startsWith(manufacturer.toLowerCase(Locale.ROOT))) return model;
+            return manufacturer + " " + model;
+        }
+
         @JavascriptInterface
         public void scanPairingCode() {
             runOnUiThread(() -> startPairingScan());

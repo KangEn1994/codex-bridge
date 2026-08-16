@@ -6,6 +6,20 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-16
+
+### Added
+
+- Added approval-based direct pairing: enter the computer address on Android, approve the named device and source IP from the Windows tray, and receive the token automatically.
+- Added tray controls for local-only, LAN, and private overlay-network access.
+- Added download-ready Windows portable and per-user Setup packages with a bundled Node.js runtime.
+- Added a unified release workflow for the Windows Setup EXE, portable ZIP, signed generic APK, and SHA-256 checksums.
+
+### Changed
+
+- Generic Android releases no longer embed a project-specific public relay URL.
+- Downloaded Windows packages no longer require users to install Node.js or npm.
+
 ## [0.5.6] - 2026-08-16
 
 ### Fixed

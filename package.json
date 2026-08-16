@@ -1,6 +1,6 @@
 {
   "name": "codex-bridge",
-  "version": "0.5.6",
+  "version": "0.6.0",
   "description": "An unofficial mobile companion for controlling Codex tasks running on your own computer.",
   "license": "Apache-2.0",
   "private": true,
@@ -21,13 +21,18 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "@vitejs/plugin-rsc": "^0.5.26",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
+    "react-server-dom-webpack": "^19.2.8",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "sharp": "^0.35.3",
+    "tsx": "^4.23.11",
+    "vinext": "^1.0.0-beta.6",
+    "vite": "^8.2.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {
@@ -39,19 +44,14 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-rsc": "^0.5.26",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "16.4.0",
-    "react-server-dom-webpack": "^19.2.8",
     "tailwindcss": "4.2.1",
-    "tsx": "^4.23.11",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.59.3",
-    "vinext": "^1.0.0-beta.6",
-    "vite": "^8.2.1"
+    "typescript-eslint": "8.59.3"
   },
   "type": "module"
 }

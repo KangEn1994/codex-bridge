@@ -79,6 +79,19 @@ import { resolveComposerPrimaryAction } from "./composer-state";
 
 type ConnectionSettings = { server: string; token: string };
 type PairingCandidate = { server: string; token?: string; code?: string };
+type PairingRequestCreated = {
+  requestId: string;
+  requestSecret: string;
+  expiresAt: string;
+  expiresIn: number;
+  hostname: string;
+};
+type PairingRequestStatus = {
+  status: "pending" | "approved" | "denied";
+  expiresAt: string;
+  hostname: string;
+  token?: string;
+};
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 type RunConfiguration = {
   model?: string;
@@ -229,6 +242,7 @@ declare global {
   interface Window {
     CodexBridgeAndroid?: {
       scanPairingCode?: () => void;
+      getDeviceName?: () => string;
       copyText?: (text: string) => void;
       notify?: (title: string, body: string, threadId: string) => void;
       notifyConnectionIssue?: (body: string) => void;
@@ -1757,6 +1771,10 @@ export function BridgeApp() {
   const [eventsConnected, setEventsConnected] = useState(false);
   const [screen, setScreen] = useState<Screen>("home");
   const [showSettings, setShowSettings] = useState(false);
+  const [pairingProgress, setPairingProgress] = useState<
+    "idle" | "requesting" | "waiting"
+  >("idle");
+  const [pairingComputerName, setPairingComputerName] = useState("");
   const [showNewTask, setShowNewTask] = useState(false);
   const [showTaskList, setShowTaskList] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -1818,6 +1836,7 @@ export function BridgeApp() {
   } | null>(null);
   const detailRequestVersionRef = useRef(0);
   const initialized = useRef(false);
+  const pairingAbortRef = useRef<AbortController | null>(null);
   const draftPreparationRef = useRef<{
     key: string;
     promise: Promise<unknown>;
@@ -1848,6 +1867,7 @@ export function BridgeApp() {
     () => () => {
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
       if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      pairingAbortRef.current?.abort();
     },
     [],
   );
@@ -2657,6 +2677,79 @@ export function BridgeApp() {
     } catch (reason) {
       setConnection("offline");
       setError(reason instanceof Error ? reason.message : "连接失败");
+    }
+  };
+  const requestComputerApproval = async () => {
+    const server = normalizeServerForCurrentPage(draftSettings.server);
+    if (!server) {
+      setError("请填写电脑地址");
+      return;
+    }
+    pairingAbortRef.current?.abort();
+    const controller = new AbortController();
+    pairingAbortRef.current = controller;
+    setPairingProgress("requesting");
+    setPairingComputerName("");
+    setConnection("connecting");
+    setError(null);
+    try {
+      const created = await requestJson<PairingRequestCreated>(
+        server,
+        "/api/pair/requests",
+        undefined,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            deviceName:
+              window.CodexBridgeAndroid?.getDeviceName?.() ||
+              "Codex Bridge Android",
+          }),
+          signal: controller.signal,
+        },
+      );
+      setPairingComputerName(created.hostname);
+      setPairingProgress("waiting");
+      const expiresAt = Date.parse(created.expiresAt);
+      while (!controller.signal.aborted && Date.now() < expiresAt) {
+        const status = await requestJson<PairingRequestStatus>(
+          server,
+          `/api/pair/requests/${encodeURIComponent(created.requestId)}/status?secret=${encodeURIComponent(created.requestSecret)}`,
+          undefined,
+          { signal: controller.signal },
+        );
+        if (status.status === "approved" && status.token) {
+          const next = { server, token: status.token };
+          await api(next, "/api/threads");
+          localStorage.setItem(storageKey, JSON.stringify(next));
+          setSettings(next);
+          setDraftSettings(next);
+          setShowSettings(false);
+          setPairingProgress("idle");
+          setConnection("online");
+          await refresh(next, null);
+          return;
+        }
+        if (status.status === "denied") throw new Error("电脑已拒绝这次连接请求");
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Pairing cancelled", "AbortError"));
+          };
+          const timer = window.setTimeout(() => {
+            controller.signal.removeEventListener("abort", onAbort);
+            resolve();
+          }, 1200);
+          controller.signal.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+      throw new Error("连接请求已超时，请重新发送");
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setConnection("offline");
+      setError(reason instanceof Error ? reason.message : "连接请求失败");
+      setPairingProgress("idle");
+    } finally {
+      if (pairingAbortRef.current === controller) pairingAbortRef.current = null;
     }
   };
   const startAttachmentUpload = (
@@ -4155,7 +4248,11 @@ export function BridgeApp() {
               {settings ? (
                 <button
                   className="icon-button"
-                  onClick={() => setShowSettings(false)}
+                  onClick={() => {
+                    pairingAbortRef.current?.abort();
+                    setPairingProgress("idle");
+                    setShowSettings(false);
+                  }}
                 >
                   <X />
                 </button>
@@ -4175,6 +4272,44 @@ export function BridgeApp() {
                   ? "打开扫码"
                   : "请使用 APK 扫码"}
               </button>
+            </div>
+            <div className="direct-pair">
+              <label>
+                电脑地址
+                <input
+                  value={draftSettings.server}
+                  onChange={(event) =>
+                    setDraftSettings((current) => ({
+                      ...current,
+                      server: event.target.value,
+                    }))
+                  }
+                  placeholder="http://192.168.1.20:43110"
+                  inputMode="url"
+                  disabled={pairingProgress !== "idle"}
+                />
+              </label>
+              <button
+                className="primary-button"
+                onClick={() => void requestComputerApproval()}
+                disabled={pairingProgress !== "idle"}
+              >
+                <DesktopTower />
+                {pairingProgress === "requesting"
+                  ? "正在联系电脑…"
+                  : pairingProgress === "waiting"
+                    ? "等待电脑确认…"
+                    : "向电脑发送连接请求"}
+              </button>
+              {pairingProgress === "waiting" ? (
+                <div className="pairing-waiting" role="status">
+                  <span className="pairing-spinner" aria-hidden="true" />
+                  <span>
+                    请在{pairingComputerName ? `电脑“${pairingComputerName}”` : "电脑"}
+                    的 Codex Bridge 托盘弹窗中选择“允许”。
+                  </span>
+                </div>
+              ) : null}
             </div>
             <details className="manual-pair">
               <summary>

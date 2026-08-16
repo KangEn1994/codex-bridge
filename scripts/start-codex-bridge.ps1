@@ -31,6 +31,9 @@ if (Test-Path -LiteralPath $launcherConfigPath) {
   try { $savedLauncherConfig = Get-Content -LiteralPath $launcherConfigPath -Raw | ConvertFrom-Json } catch { $savedLauncherConfig = $null }
 }
 
+if (-not $PSBoundParameters.ContainsKey("ListenAddress") -and $savedLauncherConfig.listenAddress) {
+  $ListenAddress = [string]$savedLauncherConfig.listenAddress
+}
 if ($PublicHost) { $PublicUrl = "http://${PublicHost}:$ApiPort" }
 if (-not $PublicUrl -and $savedLauncherConfig.publicUrl) { $PublicUrl = [string]$savedLauncherConfig.publicUrl }
 if (-not $PublicUrl) {
@@ -84,6 +87,7 @@ if (-not $webListening) {
   $webArguments = @(
     "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $webRunner,
     "-ProjectRoot", $projectRoot, "-WebPort", [string]$WebPort, "-ApiPort", [string]$ApiPort,
+    "-ListenAddress", $ListenAddress,
     "-StopSignalPath", $stopSignalPath
   )
   $webProcess = Start-Process -FilePath $powershell -ArgumentList $webArguments -WindowStyle Hidden `

@@ -489,6 +489,12 @@ svg { flex: 0 0 auto; }
 .pairing-brand-mark { width: 68px; height: 68px; border-radius: 20px; }
 .scan-hero h3 { margin: 14px 0 7px; }
 .scan-hero p { margin: 0 auto 19px; max-width: 330px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.direct-pair { padding: 0 4px 8px; }
+.direct-pair label { margin-top: 0; }
+.direct-pair .primary-button { width: 100%; margin-top: 12px; }
+.pairing-waiting { margin-top: 13px; padding: 12px 13px; display: flex; align-items: flex-start; gap: 10px; border: 1px solid #71b7ff42; border-radius: 13px; background: #71b7ff10; color: #c9d9ec; font-size: 12px; line-height: 1.55; }
+.pairing-spinner { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px; border: 2px solid #78b9ff45; border-top-color: var(--accent); border-radius: 50%; animation: pairing-spin .85s linear infinite; }
+@keyframes pairing-spin { to { transform: rotate(360deg); } }
 .manual-pair { margin-top: 8px; border-top: 1px solid var(--line); }
 .manual-pair > summary { min-height: 52px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); list-style: none; cursor: pointer; font-size: 13px; }
 .manual-pair .secondary-button { width: 100%; margin-top: 16px; }

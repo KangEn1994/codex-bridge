@@ -2,6 +2,19 @@
 
 ![Codex Bridge](public/codex-bridge-c.svg)
 
+## 下载即用
+
+普通用户不需要克隆仓库，也不需要安装 Node.js：
+
+1. 从 [GitHub Releases](https://github.com/momo-888/codex-bridge/releases) 下载并运行 `CodexBridge-Windows-Setup.exe`。
+2. 从同一 Release 下载 `CodexBridge.apk` 并安装到 Android 手机。
+3. 在 Windows 托盘图标中打开“连接方式与手机地址”，选择局域网或可信异地组网，并复制显示的地址。
+4. 在手机输入该地址并发送连接请求；核对托盘弹窗中的设备名与来源 IP 后选择允许。
+
+`CodexBridge-Windows-Portable.zip` 适合不希望安装的用户：解压后直接运行根目录的 `CodexBridge.exe`。Windows 包已经包含运行时；只有源码开发和自行构建才需要 Node.js/npm。
+
+如果手机和电脑不在同一局域网，可以使用 Tailscale、ZeroTier 等可信异地组网的电脑 IP。不要把未加密的 Host 端口直接映射到公网；公网访问应使用自行部署的 HTTPS/WSS Relay。
+
 Codex Bridge 是一个非官方的 Android/PWA 移动伴侣，用手机查看并继续运行在自己 Windows 电脑上的 Codex 任务。手机不保存 Codex 登录凭据，也不直接调用 OpenAI；请求由配对后的 Windows Host 转交给本机 Codex App Server。
 
 > [!IMPORTANT]
@@ -49,7 +62,7 @@ Codex Bridge 面向单用户、自托管场景，不是多租户服务：
 ## 环境要求
 
 - Windows 10/11
-- Node.js 22.13 或更高版本
+- Node.js 22.13 或更高版本（仅源码开发或自行构建需要；Release Windows 包已内置）
 - 已安装并登录、能够正常运行任务的 Codex Desktop
 - Android 8.0 或更高版本（使用 APK 时）
 - PowerShell 5.1 或更高版本

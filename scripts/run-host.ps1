@@ -34,9 +34,14 @@ if (Test-Path -LiteralPath $relayConfigPath) {
     $env:CODEX_BRIDGE_RELAY_PHONE_TOKEN = [string]$relay.phoneToken
   }
 }
-$npm = (Get-Command npm.cmd).Source
+$bundledNode = Join-Path $ProjectRoot "runtime\node.exe"
+$bundledHost = Join-Path $ProjectRoot "runtime\host-server.mjs"
+$tsxCli = Join-Path $ProjectRoot "node_modules\tsx\dist\cli.mjs"
+$npm = if (Test-Path -LiteralPath $bundledNode) { $null } else { (Get-Command npm.cmd).Source }
 while (-not (Test-Path -LiteralPath $StopSignalPath)) {
-  & $npm run host
+  if ($npm) { & $npm run host }
+  elseif (Test-Path -LiteralPath $bundledHost) { & $bundledNode $bundledHost }
+  else { & $bundledNode $tsxCli (Join-Path $ProjectRoot "host\server.ts") }
   $exitCode = $LASTEXITCODE
   if (Test-Path -LiteralPath $StopSignalPath) { break }
   Write-Warning "Codex Bridge Host 已退出（代码 $exitCode），2 秒后自动重启。"
