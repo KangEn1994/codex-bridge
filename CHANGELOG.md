@@ -6,6 +6,12 @@ The project follows semantic versioning where practical. While the project is be
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-16
+
+### Fixed
+
+- Bundled the connection screen's scanner icon as a small vector asset instead of shipping the full extended Material icon library, reducing the Android download size without changing the interface.
+
 ## [0.6.3] - 2026-08-16
 
 ### Changed

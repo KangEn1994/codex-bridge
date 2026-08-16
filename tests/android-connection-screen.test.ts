@@ -24,7 +24,7 @@ test("fresh Android installs use the offline Compose connection screen", async (
   assert.match(manifest, /android:name="\.ConnectionActivity"/);
   assert.match(connectionActivity, /text = "扫码连接电脑"/);
   assert.match(connectionActivity, /text = "手动输入地址和令牌"/);
-  assert.match(connectionActivity, /Icons\.Default\.QrCodeScanner/);
+  assert.match(connectionActivity, /R\.drawable\.ic_qr_code_scanner/);
 });
 
 test("the offline connection screen returns scans and manual tokens to the existing pairing flow", async () => {

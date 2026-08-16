@@ -37,7 +37,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -261,7 +260,7 @@ private fun ConnectionScreen(
                         ),
                     ) {
                         Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
+                            painter = painterResource(R.drawable.ic_qr_code_scanner),
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
                         )
