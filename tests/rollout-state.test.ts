@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -83,6 +83,33 @@ test("recovers a turn boundary that moved beyond the recent tail window", async 
       "utf8",
     );
     assert.equal((await inspectRollout(rolloutPath)).state, "idle");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("uses the latest rollout event time when the file mtime is stale", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codex-rollout-state-"));
+  const rolloutPath = path.join(directory, "rollout.jsonl");
+  const startedAt = "2026-08-17T11:10:35.165Z";
+  const completedAt = "2026-08-17T11:10:50.415Z";
+  try {
+    await writeFile(
+      rolloutPath,
+      [
+        JSON.stringify({ timestamp: startedAt, type: "event_msg", payload: { type: "task_started" } }),
+        JSON.stringify({ timestamp: completedAt, type: "event_msg", payload: { type: "task_complete" } }),
+      ].join("\n"),
+      "utf8",
+    );
+    const staleMtime = new Date("2026-08-17T09:06:39.797Z");
+    await utimes(rolloutPath, staleMtime, staleMtime);
+
+    const result = await inspectRollout(rolloutPath);
+
+    assert.equal(result.state, "idle");
+    assert.equal(result.lastActivityAt, Date.parse(completedAt));
+    assert.ok(result.lastActivityAt > Date.parse(startedAt));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

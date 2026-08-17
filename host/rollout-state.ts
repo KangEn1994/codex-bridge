@@ -29,10 +29,15 @@ type RolloutRecord = {
   };
 };
 
-export function inspectRolloutText(text: string): Omit<RolloutState, "lastActivityAt"> {
+type ParsedRolloutState = Omit<RolloutState, "lastActivityAt"> & {
+  lastEventAt: number | null;
+};
+
+function inspectRolloutTextWithTimestamp(text: string): ParsedRolloutState {
   let state: RolloutState["state"] = "unknown";
   let reason = "No turn boundary found";
   let runConfiguration: RunConfiguration | null = null;
+  let lastEventAt: number | null = null;
 
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -41,6 +46,10 @@ export function inspectRolloutText(text: string): Omit<RolloutState, "lastActivi
       record = JSON.parse(line) as RolloutRecord;
     } catch {
       continue;
+    }
+    if (typeof record.timestamp === "string") {
+      const timestamp = Date.parse(record.timestamp);
+      if (Number.isFinite(timestamp)) lastEventAt = Math.max(lastEventAt ?? timestamp, timestamp);
     }
     const event = record.payload?.type;
     const phase = record.payload?.phase;
@@ -91,7 +100,16 @@ export function inspectRolloutText(text: string): Omit<RolloutState, "lastActivi
     }
   }
 
-  return { state, reason, runConfiguration };
+  return { state, reason, runConfiguration, lastEventAt };
+}
+
+export function inspectRolloutText(text: string): Omit<RolloutState, "lastActivityAt"> {
+  const parsed = inspectRolloutTextWithTimestamp(text);
+  return {
+    state: parsed.state,
+    reason: parsed.reason,
+    runConfiguration: parsed.runConfiguration,
+  };
 }
 
 function inspectRolloutMarkers(text: string): Omit<RolloutState, "lastActivityAt"> {
@@ -158,15 +176,23 @@ export async function inspectRollout(
       const buffer = Buffer.alloc(bytes);
       const offset = Math.max(0, metadata.size - bytes);
       await handle.read(buffer, 0, bytes, offset);
-      let parsed = inspectRolloutText(buffer.toString("utf8"));
+      const recentText = buffer.toString("utf8");
+      const recent = inspectRolloutTextWithTimestamp(recentText);
+      const { lastEventAt, ...recentState } = recent;
+      let parsed = recentState;
       if (parsed.state === "unknown" && options.deepFallback !== false) {
         const recentConfiguration = parsed.runConfiguration;
-        parsed = inspectRolloutMarkers(buffer.toString("utf8"));
+        parsed = inspectRolloutMarkers(recentText);
         if (parsed.state === "unknown" && offset > 0)
           parsed = await inspectEarlierRollout(handle, offset);
         if (recentConfiguration) parsed.runConfiguration = recentConfiguration;
       }
-      return { ...parsed, lastActivityAt: metadata.mtimeMs };
+      // Codex Desktop can keep a rollout file open while appending records. On
+      // Windows, the visible file mtime may then remain stale until that handle
+      // is closed even though new task boundaries are already readable. Prefer
+      // the timestamp stored in the latest JSONL record so a completed desktop
+      // turn cannot remain stuck as active on mobile.
+      return { ...parsed, lastActivityAt: lastEventAt ?? metadata.mtimeMs };
     } finally {
       await handle.close();
     }
