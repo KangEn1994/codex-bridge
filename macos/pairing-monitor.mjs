@@ -1,6 +1,10 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
-import { loadLauncherConfig, readJson } from "./config.mjs";
+import {
+  loadLauncherConfig,
+  MIN_CONNECTION_PASSWORD_LENGTH,
+  readJson,
+} from "./config.mjs";
 
 export class PairingMonitor extends EventEmitter {
   constructor(paths, options = {}) {
@@ -108,7 +112,8 @@ export class PairingMonitor extends EventEmitter {
     await fs.access(this.paths.hostConfig);
     const config = await readJson(this.paths.hostConfig, {});
     const token = typeof config.token === "string" ? config.token : "";
-    if (token.length < 20) throw new Error("Host 配对令牌尚未就绪");
+    if (token.length < MIN_CONNECTION_PASSWORD_LENGTH)
+      throw new Error("Host 配对令牌尚未就绪");
     return token;
   }
 }

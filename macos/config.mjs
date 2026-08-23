@@ -9,6 +9,8 @@ export const DEFAULT_LAUNCHER_CONFIG = Object.freeze({
   listenAddress: "127.0.0.1",
 });
 
+export const MIN_CONNECTION_PASSWORD_LENGTH = 12;
+
 export function bridgePaths(projectRoot) {
   const configDirectory = path.join(os.homedir(), ".codex-bridge");
   return {
@@ -98,6 +100,25 @@ export async function loadEnabledState(paths) {
 
 export async function saveEnabledState(paths, enabled) {
   await writeJsonAtomic(paths.supervisorState, { enabled: Boolean(enabled) });
+}
+
+export function validateConnectionPassword(input) {
+  const password = String(input?.password || "").trim();
+  const confirmation = String(input?.confirmation || "").trim();
+  if (password.length < MIN_CONNECTION_PASSWORD_LENGTH)
+    throw new Error(`连接密码至少需要 ${MIN_CONNECTION_PASSWORD_LENGTH} 个字符`);
+  if (password.length > 128) throw new Error("连接密码不能超过 128 个字符");
+  if (!/^[\x21-\x7e]+$/.test(password))
+    throw new Error("连接密码只能包含英文字母、数字和英文符号，不能包含空格");
+  if (password !== confirmation) throw new Error("两次输入的连接密码不一致");
+  return password;
+}
+
+export async function saveConnectionPassword(paths, input) {
+  const token = validateConnectionPassword(input);
+  const current = await readJson(paths.hostConfig, {});
+  await writeJsonAtomic(paths.hostConfig, { ...current, token });
+  return { ok: true };
 }
 
 export function normalizeSiteUrl(value, { relay = false } = {}) {

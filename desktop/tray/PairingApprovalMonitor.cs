@@ -20,6 +20,7 @@ namespace CodexBridge.Tray
 
     internal sealed class PairingApprovalMonitor : IDisposable
     {
+        private const int MinimumConnectionPasswordLength = 12;
         private readonly Func<int> apiPort;
         private readonly JavaScriptSerializer json = new JavaScriptSerializer();
         private readonly HashSet<string> prompted = new HashSet<string>(StringComparer.Ordinal);
@@ -131,7 +132,7 @@ namespace CodexBridge.Tray
             if (!File.Exists(path)) throw new InvalidOperationException("Host pairing token is not ready.");
             var value = json.DeserializeObject(File.ReadAllText(path)) as Dictionary<string, object>;
             string token = value == null ? "" : ReadString(value, "token");
-            if (token.Length < 20) throw new InvalidOperationException("Host pairing token is invalid.");
+            if (token.Length < MinimumConnectionPasswordLength) throw new InvalidOperationException("Host pairing token is invalid.");
             return token;
         }
 

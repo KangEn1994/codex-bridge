@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   DEFAULT_LAUNCHER_CONFIG,
+  MIN_CONNECTION_PASSWORD_LENGTH,
   normalizeSiteUrl,
+  saveConnectionPassword,
+  validateConnectionPassword,
   validateConnectionSettings,
 } from "../macos/config.mjs";
 import { BridgeState, buildSnapshot } from "../macos/supervisor-core.mjs";
@@ -95,9 +100,52 @@ test("derives online, degraded, and offline macOS supervisor states", () => {
 });
 
 test("keeps the macOS management API on loopback and rejects browser CSRF", async () => {
-  const source = await readFile(new URL("../macos/supervisor.mjs", import.meta.url), "utf8");
+  const [source, dashboard, dashboardScript] = await Promise.all([
+    readFile(new URL("../macos/supervisor.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../macos/dashboard.html", import.meta.url), "utf8"),
+    readFile(new URL("../macos/dashboard.js", import.meta.url), "utf8"),
+  ]);
   assert.match(source, /server\.listen\(managerPort, "127\.0\.0\.1"/);
   assert.match(source, /validManagerHost\(request\)/);
   assert.match(source, /validMutationOrigin\(request\)/);
+  assert.match(source, /\/api\/security\/connection-password/);
+  assert.match(source, /throw new HttpError\(400, error instanceof Error/);
+  assert.match(dashboard, /id="passwordForm"/);
+  assert.match(dashboard, /id="connectionPassword"[^>]*minlength="12"/);
+  assert.match(dashboardScript, /saveConnectionPassword/);
   assert.doesNotMatch(source, /Access-Control-Allow-Origin/);
+});
+
+test("validates and privately persists a rotated connection password", async () => {
+  assert.equal(MIN_CONNECTION_PASSWORD_LENGTH, 12);
+  assert.throws(
+    () => validateConnectionPassword({ password: "a".repeat(11), confirmation: "a".repeat(11) }),
+    /至少需要 12/,
+  );
+  assert.throws(
+    () => validateConnectionPassword({ password: "a".repeat(12), confirmation: "b".repeat(12) }),
+    /不一致/,
+  );
+  assert.equal(
+    validateConnectionPassword({ password: "a".repeat(12), confirmation: "a".repeat(12) }),
+    "a".repeat(12),
+  );
+  assert.throws(
+    () => validateConnectionPassword({ password: `valid password ${"x".repeat(20)}`, confirmation: `valid password ${"x".repeat(20)}` }),
+    /不能包含空格/,
+  );
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codex-bridge-password-"));
+  const paths = { configDirectory: directory, hostConfig: path.join(directory, "config.json") };
+  const password = `new-password-${"x".repeat(24)}`;
+  try {
+    await writeFile(paths.hostConfig, JSON.stringify({ token: "old", port: 43110 }), { mode: 0o600 });
+    await saveConnectionPassword(paths, { password, confirmation: password });
+    const saved = JSON.parse(await readFile(paths.hostConfig, "utf8"));
+    assert.equal(saved.token, password);
+    assert.equal(saved.port, 43110);
+    assert.equal((await stat(paths.hostConfig)).mode & 0o777, 0o600);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
