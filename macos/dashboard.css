@@ -45,6 +45,7 @@ button.quiet { background: transparent; }
 .mode small { color: #858c96; line-height: 1.45; }
 .mode input:checked + span { border-color: #dff35c; box-shadow: 0 0 0 1px #dff35c inset; background: #191d15; }
 .fields { display: grid; gap: 14px; margin-top: 18px; padding: 18px; background: #0e1115; border: 1px solid #292e35; border-radius: 14px; }
+.password-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .hidden { display: none !important; }
 label { display: grid; gap: 7px; color: #c7cbd1; font-size: 13px; font-weight: 650; }
 input, select { width: 100%; color: #edf0f2; background: #171b20; border: 1px solid #373d46; border-radius: 9px; padding: 10px 11px; outline: none; }
@@ -65,6 +66,7 @@ footer { color: #747b85; text-align: center; font-size: 12px; padding: 12px; }
   .hero, .section-title, .address-row, .form-footer { align-items: flex-start; flex-direction: column; }
   .health-grid, .mode-grid { grid-template-columns: 1fr 1fr; }
   .inline-actions { justify-content: flex-start; }
+  .password-fields { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 460px) {

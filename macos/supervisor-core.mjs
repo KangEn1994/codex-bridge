@@ -10,6 +10,7 @@ import {
   loadLauncherConfig,
   loadRelayConfig,
   saveConnectionSettings,
+  saveConnectionPassword,
   saveEnabledState,
 } from "./config.mjs";
 
@@ -238,6 +239,13 @@ export class BridgeSupervisor extends EventEmitter {
     const result = await saveConnectionSettings(this.paths, input);
     await this.log("connection_configuration_saved", `${result.mode} ${result.mobileUrl}`);
     await this.restartBridge("connection-configuration-changed");
+    return result;
+  }
+
+  async updateConnectionPassword(input) {
+    const result = await saveConnectionPassword(this.paths, input);
+    await this.log("connection_password_changed", "");
+    await this.restartBridge("connection-password-changed");
     return result;
   }
 

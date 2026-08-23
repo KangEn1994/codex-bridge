@@ -163,6 +163,31 @@ async function saveConfiguration(event) {
   }
 }
 
+async function saveConnectionPassword(event) {
+  event.preventDefault();
+  const password = $("#connectionPassword");
+  const confirmation = $("#connectionPasswordConfirmation");
+  const output = $("#passwordResult");
+  const submit = event.currentTarget.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  output.textContent = "正在修改并重启 Bridge…";
+  try {
+    await request("/api/security/connection-password", {
+      method: "POST",
+      body: JSON.stringify({ password: password.value, confirmation: confirmation.value }),
+    });
+    password.value = "";
+    confirmation.value = "";
+    output.textContent = "连接密码已修改；旧密码已经失效。";
+    toast("连接密码已修改");
+    await refreshStatus();
+  } catch (error) {
+    output.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
 async function refreshPairing() {
   const container = $("#pairingList");
   try {
@@ -272,6 +297,7 @@ document.addEventListener("click", async (event) => {
 });
 
 $("#connectionForm").addEventListener("submit", saveConfiguration);
+$("#passwordForm").addEventListener("submit", saveConnectionPassword);
 $$('input[name="mode"]').forEach((input) => input.addEventListener("change", modeChanged));
 $("#networkAddress").addEventListener("change", modeChanged);
 $("#logName").addEventListener("change", refreshLog);

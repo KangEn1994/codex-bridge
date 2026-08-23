@@ -62,12 +62,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.URI
 
+internal const val MIN_CONNECTION_PASSWORD_LENGTH = 12
+
 class ConnectionActivity : ComponentActivity() {
+    private lateinit var connectionHistory: ConnectionHistoryStore
+
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -86,6 +91,8 @@ class ConnectionActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         val currentServer = intent.getStringExtra(EXTRA_CURRENT_SERVER).orEmpty()
+        connectionHistory = ConnectionHistoryStore(this)
+        val savedConnections = connectionHistory.load()
 
         setContent {
             MaterialTheme(
@@ -99,9 +106,11 @@ class ConnectionActivity : ComponentActivity() {
             ) {
                 ConnectionScreen(
                     currentServer = currentServer,
+                    initialConnections = savedConnections,
                     onClose = ::closeConnectionScreen,
                     onScan = ::startPairingScanner,
                     onConnect = ::returnManualConnection,
+                    onForget = connectionHistory::remove,
                 )
             }
         }
@@ -121,6 +130,7 @@ class ConnectionActivity : ComponentActivity() {
     }
 
     private fun returnManualConnection(server: String, token: String) {
+        connectionHistory.remember(server, token)
         setResult(
             Activity.RESULT_OK,
             Intent()
@@ -150,13 +160,24 @@ private val ConnectionButtonText = Color(0xFF07111B)
 @Composable
 private fun ConnectionScreen(
     currentServer: String,
+    initialConnections: List<SavedConnection>,
     onClose: () -> Unit,
     onScan: () -> Unit,
     onConnect: (String, String) -> Unit,
+    onForget: (String) -> List<SavedConnection>,
 ) {
-    var manualExpanded by remember { mutableStateOf(false) }
-    var server by remember(currentServer) { mutableStateOf(currentServer) }
-    var token by remember { mutableStateOf("") }
+    val currentConnection = initialConnections.firstOrNull {
+        it.server.equals(currentServer, ignoreCase = true)
+    }
+    val initialConnection = currentConnection ?: initialConnections.firstOrNull()
+    var savedConnections by remember(initialConnections) { mutableStateOf(initialConnections) }
+    var manualExpanded by remember { mutableStateOf(initialConnections.isNotEmpty()) }
+    var server by remember(currentServer, initialConnection) {
+        mutableStateOf(currentServer.ifBlank { initialConnection?.server.orEmpty() })
+    }
+    var token by remember(currentConnection, initialConnection, currentServer) {
+        mutableStateOf((currentConnection ?: if (currentServer.isBlank()) initialConnection else null)?.token.orEmpty())
+    }
     var serverError by remember { mutableStateOf<String?>(null) }
     var tokenError by remember { mutableStateOf<String?>(null) }
 
@@ -280,6 +301,72 @@ private fun ConnectionScreen(
                         .background(ConnectionDivider),
                 )
 
+                if (savedConnections.isNotEmpty()) {
+                    Column(modifier = Modifier.padding(top = 17.dp, bottom = 4.dp)) {
+                        Text(
+                            text = "最近手动连接",
+                            color = ConnectionMuted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(9.dp))
+                        savedConnections.forEach { connection ->
+                            Surface(
+                                onClick = {
+                                    server = connection.server
+                                    token = connection.token
+                                    serverError = null
+                                    tokenError = null
+                                    manualExpanded = true
+                                },
+                                color = Color(0xFF10151A),
+                                shape = RoundedCornerShape(13.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .border(1.dp, ConnectionBorder, RoundedCornerShape(13.dp)),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(start = 14.dp, top = 9.dp, bottom = 9.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = connection.server,
+                                            color = ConnectionText,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            text = if (connection.token.isBlank()) "未保存连接密码" else "已保存连接密码",
+                                            color = ConnectionMuted,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            savedConnections = onForget(connection.server)
+                                            if (server.equals(connection.server, ignoreCase = true)) {
+                                                token = ""
+                                            }
+                                        },
+                                        modifier = Modifier.size(40.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "删除 ${connection.server}",
+                                            tint = ConnectionMuted,
+                                            modifier = Modifier.size(19.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Surface(
                     onClick = { manualExpanded = !manualExpanded },
                     color = Color.Transparent,
@@ -335,8 +422,8 @@ private fun ConnectionScreen(
                                 tokenError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("配对令牌（可选）") },
-                            placeholder = { Text("粘贴电脑端令牌") },
+                            label = { Text("连接密码（可选）") },
+                            placeholder = { Text("输入电脑端连接密码") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Password,
@@ -354,8 +441,11 @@ private fun ConnectionScreen(
                                 val normalized = normalizeServer(server)
                                 serverError = if (normalized == null) "请输入有效的 HTTP 或 HTTPS 地址" else null
                                 val trimmedToken = token.trim()
-                                tokenError = if (trimmedToken.isNotEmpty() && trimmedToken.length < 20) {
-                                    "令牌长度不正确"
+                                tokenError = if (
+                                    trimmedToken.isNotEmpty() &&
+                                    trimmedToken.length < MIN_CONNECTION_PASSWORD_LENGTH
+                                ) {
+                                    "连接密码至少需要 $MIN_CONNECTION_PASSWORD_LENGTH 个字符"
                                 } else null
                                 if (normalized != null && tokenError == null) onConnect(normalized, trimmedToken)
                             },
@@ -390,7 +480,7 @@ private fun connectionTextFieldColors() = OutlinedTextFieldDefaults.colors(
     cursorColor = ConnectionBlue,
 )
 
-private fun normalizeServer(candidate: String): String? {
+internal fun normalizeServer(candidate: String): String? {
     var normalized = candidate.trim()
     if (normalized.isBlank()) return null
     if (!normalized.contains("://")) normalized = "http://$normalized"

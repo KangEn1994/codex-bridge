@@ -12,6 +12,7 @@ import {
   loadLauncherConfig,
   loadRelayConfig,
   normalizeSiteUrl,
+  validateConnectionPassword,
 } from "./config.mjs";
 import { PairingMonitor } from "./pairing-monitor.mjs";
 import { BridgeSupervisor, probe } from "./supervisor-core.mjs";
@@ -240,6 +241,17 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/configuration") {
       const result = await supervisor.updateConnection(await readJsonBody(request));
+      sendJson(response, 200, result);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/security/connection-password") {
+      const body = await readJsonBody(request);
+      try {
+        validateConnectionPassword(body);
+      } catch (error) {
+        throw new HttpError(400, error instanceof Error ? error.message : String(error));
+      }
+      const result = await supervisor.updateConnectionPassword(body);
       sendJson(response, 200, result);
       return;
     }

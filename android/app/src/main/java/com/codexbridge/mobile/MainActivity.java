@@ -63,6 +63,8 @@ public final class MainActivity extends Activity {
     private static final int IMAGE_PICKER_REQUEST = 75;
     private static final int CONNECTION_REQUEST = 76;
     private static final int NATIVE_BRIDGE_PROTOCOL = 1;
+    private static final int MIN_CONNECTION_PASSWORD_LENGTH = 12;
+    private static final int MIN_PAIRING_CODE_LENGTH = 20;
     private static final String NATIVE_MESSAGE_OBJECT = "CodexBridgeNative";
 
     private WebView webView;
@@ -155,7 +157,9 @@ public final class MainActivity extends Activity {
         String server = normalizeUrl(value(data.getQueryParameter("server")));
         String token = data.getQueryParameter("token");
         String code = data.getQueryParameter("code");
-        if (server == null || ((token == null || token.length() < 20) && (code == null || code.length() < 20))) return bridgeUrl;
+        if (server == null ||
+            ((token == null || token.length() < MIN_CONNECTION_PASSWORD_LENGTH) &&
+            (code == null || code.length() < MIN_PAIRING_CODE_LENGTH))) return bridgeUrl;
         bridgeUrl = server;
         getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putString(URL_KEY, bridgeUrl).apply();
         try {
@@ -414,7 +418,7 @@ public final class MainActivity extends Activity {
             && path.matches(".*/api/threads/[^/]+/(?:images|attachments)/[^/]+")
             && previewPath.matches(".*/api/threads/[^/]+/(?:images|attachments)/[^/]+")
             && "preview".equals(preview.getQueryParameter("variant"))
-            && value(token).length() >= 20;
+            && value(token).length() >= MIN_CONNECTION_PASSWORD_LENGTH;
         if (!valid) {
             Toast.makeText(this, "无法安全地打开这张图片", Toast.LENGTH_SHORT).show();
             return false;
@@ -547,7 +551,8 @@ public final class MainActivity extends Activity {
     private boolean connectToBridge(String rawServer, String rawToken) {
         String server = normalizeUrl(rawServer);
         String token = value(rawToken).trim();
-        if (server == null || (!token.isEmpty() && token.length() < 20)) return false;
+        if (server == null ||
+            (!token.isEmpty() && token.length() < MIN_CONNECTION_PASSWORD_LENGTH)) return false;
         bridgeUrl = server;
         getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putString(URL_KEY, bridgeUrl).apply();
         configureNativeMessageBridge();

@@ -50,6 +50,29 @@
       <section class="card">
         <div class="section-title">
           <div>
+            <h2>连接密码</h2>
+            <p class="muted">用于手机手动连接和配对授权；修改后，已连接设备需要使用新密码重新连接。</p>
+          </div>
+        </div>
+        <form id="passwordForm">
+          <div class="fields password-fields">
+            <label>新连接密码
+              <input id="connectionPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="至少 12 个英文字符">
+            </label>
+            <label>再次输入
+              <input id="connectionPasswordConfirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="再次输入新连接密码">
+            </label>
+          </div>
+          <div class="form-footer">
+            <span id="passwordResult" class="muted">密码不会显示在管理页面或日志中。</span>
+            <button class="primary" type="submit">修改密码并重启</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
             <h2>手机连接</h2>
             <p class="muted">默认仅本机；仅在可信私有网络中开启直连。</p>
           </div>
