@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { CodexBridge } from "../host/bridge";
 import type { RolloutState } from "../host/rollout-state";
@@ -61,6 +64,48 @@ test("keeps a desktop-dispatched task active until a newer completion is persist
   });
   const listed = await bridge.listThreads();
   assert.equal(listed.data[0].desktopActive, true);
+});
+
+test("detects an active Desktop rollout on the first task-list read", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codex-desktop-list-"));
+  const rolloutPath = path.join(directory, "rollout.jsonl");
+  await writeFile(
+    rolloutPath,
+    `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: "event_msg",
+      payload: { type: "task_started" },
+    })}\n`,
+    "utf8",
+  );
+
+  const bridge = new CodexBridge();
+  (bridge.rpc as unknown as { request: () => Promise<unknown> }).request = async () => ({
+    data: [
+      {
+        id: "thread-active-on-desktop",
+        name: null,
+        preview: "still running",
+        cwd: "/workspace",
+        source: "appServer",
+        modelProvider: "openai",
+        createdAt: 1,
+        updatedAt: 2,
+        status: { type: "notLoaded" },
+        path: rolloutPath,
+        turns: [],
+      },
+    ],
+    nextCursor: null,
+  });
+
+  try {
+    const listed = await bridge.listThreads();
+    assert.equal(listed.data[0].desktopActive, true);
+  } finally {
+    await bridge.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("interrupts a Desktop-owned active turn through its renderer owner", async () => {

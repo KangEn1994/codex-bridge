@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -74,6 +74,14 @@ export type ThreadGoal = {
 
 type ThreadGoalResponse = { goal: ThreadGoal | null };
 
+type RolloutStateCacheEntry = {
+  size: number;
+  mtimeMs: number;
+  inspectedAt: number;
+  deepInspected: boolean;
+  state: RolloutState;
+};
+
 type PreparedThread = {
   thread: CodexThread;
   client: CodexRpcClient;
@@ -145,6 +153,33 @@ function normalizeWorkspacePath(candidate: string) {
     : path.resolve(candidate);
 }
 
+const THREAD_LIST_ROLLOUT_INSPECTION_LIMIT = 24;
+const DESKTOP_OWNER_RETRY_DELAY_MS = 30_000;
+
+function isDesktopOwnerRoutingError(error: unknown) {
+  return (
+    error instanceof Error &&
+    /no-client-found|client-cannot-handle-request/i.test(error.message)
+  );
+}
+
+class DesktopOwnerDispatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DesktopOwnerDispatchError";
+  }
+}
+
+class DesktopOwnerUnavailableError extends DesktopOwnerDispatchError {
+  constructor(threadId: string) {
+    super(
+      `Codex Desktop owns task ${threadId}, but its IPC route is unavailable. ` +
+        "Restart or update Codex Desktop before sending the queued message.",
+    );
+    this.name = "DesktopOwnerUnavailableError";
+  }
+}
+
 export class CodexBridge extends EventEmitter {
   readonly rpc = new CodexRpcClient();
   readonly activeTurns = new Map<string, string>();
@@ -173,6 +208,7 @@ export class CodexBridge extends EventEmitter {
   private retryAfter = new Map<string, number>();
   private desktopActiveThreads = new Map<string, number>();
   private rolloutWatches = new Map<string, { path: string; watcher: FSWatcher; timer: NodeJS.Timeout | null; lastUsedAt: number }>();
+  private rolloutStateCache = new Map<string, RolloutStateCacheEntry>();
   private runOptionsCache = new Map<string, { expiresAt: number; value: RunOptions }>();
 
   constructor(readonly desktopIntegration = new DesktopIntegrationService()) {
@@ -205,6 +241,7 @@ export class CodexBridge extends EventEmitter {
       entry.watcher.close();
     }
     this.rolloutWatches.clear();
+    this.rolloutStateCache.clear();
     const writerStarting = this.writerClientStarting;
     const ownerClients = new Set(this.leasedClients);
     for (const client of this.ownerClients.values()) ownerClients.add(client);
@@ -334,22 +371,22 @@ export class CodexBridge extends EventEmitter {
       useStateDbOnly: true,
       ...params,
     });
+    const visibleThreads = response.data.filter(
+      (thread) =>
+        ![...this.draftPreparations.values()].some(
+          (entry) => entry.prepared?.thread.id === thread.id,
+        ),
+    );
+    await this.refreshListedDesktopActivity(visibleThreads);
     return {
       ...response,
-      data: response.data
-        .filter(
-          (thread) =>
-            ![...this.draftPreparations.values()].some(
-              (entry) => entry.prepared?.thread.id === thread.id,
-            ),
-        )
-        .map((thread) => ({
-          ...thread,
-          bridgeActive: this.activeTurns.has(thread.id),
-          bridgeOwned: this.ownerClients.has(thread.id),
-          desktopActive: this.desktopActiveThreads.has(thread.id),
-          queueLength: this.queue.filter((item) => item.threadId === thread.id).length,
-        })),
+      data: visibleThreads.map((thread) => ({
+        ...thread,
+        bridgeActive: this.activeTurns.has(thread.id),
+        bridgeOwned: this.ownerClients.has(thread.id),
+        desktopActive: this.desktopActiveThreads.has(thread.id),
+        queueLength: this.queue.filter((item) => item.threadId === thread.id).length,
+      })),
     };
   }
 
@@ -370,7 +407,10 @@ export class CodexBridge extends EventEmitter {
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
     }
-    const rollout = this.reconcileDesktopActivity(threadId, await inspectRollout(response.thread.path));
+    const rollout = this.reconcileDesktopActivity(
+      threadId,
+      await this.inspectRolloutState(response.thread.path),
+    );
     this.watchRollout(threadId, response.thread.path);
     const goal = await this.getThreadGoal(threadId).catch((error) => {
       logBridgeEvent("thread_goal_read_failed", {
@@ -982,6 +1022,7 @@ export class CodexBridge extends EventEmitter {
     configuration?: RunConfiguration,
   ) {
     const ownerLookupStartedAt = Date.now();
+    let desktopOwnerObserved = false;
     try {
       const ownerClientId = await this.desktopIntegration.findThreadOwner("local", threadId);
       logBridgeEvent("desktop_owner_checked", {
@@ -990,34 +1031,57 @@ export class CodexBridge extends EventEmitter {
         durationMs: Date.now() - ownerLookupStartedAt,
       });
       if (ownerClientId) {
-        const desktopStartAt = Date.now();
-        if (configuration) {
-          await this.desktopIntegration.updateThreadSettings(
+        desktopOwnerObserved = true;
+        try {
+          return await this.dispatchToDesktopOwner(
             ownerClientId,
             threadId,
-            {
-              ...(configuration.model ? { model: configuration.model } : {}),
-              ...(configuration.effort ? { effort: configuration.effort } : {}),
-            },
+            input,
+            overrides,
+            configuration,
           );
+        } catch (error) {
+          if (!isDesktopOwnerRoutingError(error)) throw error;
+          const refreshedOwnerClientId = await this.desktopIntegration.findThreadOwner(
+            "local",
+            threadId,
+          );
+          logBridgeEvent("desktop_owner_refreshed", {
+            threadId,
+            previousOwnerClientId: ownerClientId,
+            ownerClientId: refreshedOwnerClientId,
+            found: Boolean(refreshedOwnerClientId),
+          });
+          if (!refreshedOwnerClientId)
+            throw new DesktopOwnerUnavailableError(threadId);
+          try {
+            return await this.dispatchToDesktopOwner(
+              refreshedOwnerClientId,
+              threadId,
+              input,
+              overrides,
+              configuration,
+            );
+          } catch (retryError) {
+            if (isDesktopOwnerRoutingError(retryError))
+              throw new DesktopOwnerUnavailableError(threadId);
+            throw retryError;
+          }
         }
-        const result = await this.desktopIntegration.startTurn(
-          ownerClientId,
-          threadId,
-          input,
-          overrides,
-        );
-        this.desktopActiveThreads.set(threadId, desktopStartAt);
-        logBridgeEvent("desktop_turn_dispatched", {
-          threadId,
-          durationMs: Date.now() - desktopStartAt,
-        });
-        this.emitEvent("bridge/desktopTurnStarted", { threadId, state: "active", desktopActive: true });
-        return { via: "desktop" as const, turn: result };
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/active|already.*turn|in progress/i.test(message)) throw error;
+      if (desktopOwnerObserved) {
+        logBridgeEvent("desktop_owner_dispatch_failed", {
+          threadId,
+          error: message,
+        });
+        this.desktopIntegration.close();
+        throw error instanceof DesktopOwnerDispatchError
+          ? error
+          : new DesktopOwnerDispatchError(message);
+      }
       logBridgeEvent("desktop_ipc_unavailable", { threadId, error: message });
       this.desktopIntegration.close();
     }
@@ -1028,6 +1092,43 @@ export class CodexBridge extends EventEmitter {
       durationMs: Date.now() - bridgeStartAt,
     });
     return { via: "bridge" as const, turn };
+  }
+
+  private async dispatchToDesktopOwner(
+    ownerClientId: string,
+    threadId: string,
+    input: CodexInput[],
+    overrides: CodexRunOverrides,
+    configuration?: RunConfiguration,
+  ) {
+    const desktopStartAt = Date.now();
+    if (configuration) {
+      await this.desktopIntegration.updateThreadSettings(
+        ownerClientId,
+        threadId,
+        {
+          ...(configuration.model ? { model: configuration.model } : {}),
+          ...(configuration.effort ? { effort: configuration.effort } : {}),
+        },
+      );
+    }
+    const result = await this.desktopIntegration.startTurn(
+      ownerClientId,
+      threadId,
+      input,
+      overrides,
+    );
+    this.desktopActiveThreads.set(threadId, desktopStartAt);
+    logBridgeEvent("desktop_turn_dispatched", {
+      threadId,
+      durationMs: Date.now() - desktopStartAt,
+    });
+    this.emitEvent("bridge/desktopTurnStarted", {
+      threadId,
+      state: "active",
+      desktopActive: true,
+    });
+    return { via: "desktop" as const, turn: result };
   }
 
   private async enqueue(
@@ -1085,12 +1186,26 @@ export class CodexBridge extends EventEmitter {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const activeWriter = /already has an active writer/i.test(errorMessage);
-          this.retryAfter.set(item.threadId, Date.now() + (activeWriter ? 10_000 : 5_000));
-          logBridgeEvent(activeWriter ? "queue_waiting_for_active_writer" : "queue_retry_failed", {
-            threadId: item.threadId,
-            queueId: item.id,
-            error: errorMessage,
-          });
+          const desktopOwnerFailure = error instanceof DesktopOwnerDispatchError;
+          const retryDelayMs = desktopOwnerFailure
+            ? DESKTOP_OWNER_RETRY_DELAY_MS
+            : activeWriter
+              ? 10_000
+              : 5_000;
+          this.retryAfter.set(item.threadId, Date.now() + retryDelayMs);
+          logBridgeEvent(
+            desktopOwnerFailure
+              ? "queue_waiting_for_desktop_owner"
+              : activeWriter
+                ? "queue_waiting_for_active_writer"
+                : "queue_retry_failed",
+            {
+              threadId: item.threadId,
+              queueId: item.id,
+              error: errorMessage,
+              retryDelayMs,
+            },
+          );
           this.emitEvent("bridge/queueError", {
             item: this.publicQueueItem(item),
             message: error instanceof Error ? error.message : "Unable to start queued message",
@@ -1168,6 +1283,70 @@ export class CodexBridge extends EventEmitter {
 
   private emitEvent(method: string, params: unknown) {
     this.emit("event", { method, params, at: Date.now() });
+  }
+
+  private async refreshListedDesktopActivity(threads: CodexThread[]) {
+    const queuedThreadIds = new Set(this.queue.map((item) => item.threadId));
+    const candidates = threads.filter(
+      (thread, index) =>
+        Boolean(thread.path) &&
+        (index < THREAD_LIST_ROLLOUT_INSPECTION_LIMIT ||
+          thread.status.type === "active" ||
+          queuedThreadIds.has(thread.id) ||
+          this.desktopActiveThreads.has(thread.id) ||
+          this.rolloutWatches.has(thread.id)),
+    );
+
+    await Promise.all(
+      candidates.map(async (thread) => {
+        const rollout = await this.inspectRolloutState(thread.path);
+        this.reconcileDesktopActivity(thread.id, rollout);
+        this.watchRollout(thread.id, thread.path);
+      }),
+    );
+  }
+
+  private async inspectRolloutState(
+    rolloutPath: string | null | undefined,
+    options: { deepFallback?: boolean; force?: boolean } = {},
+  ) {
+    const deepFallback = options.deepFallback !== false;
+    if (!rolloutPath) return inspectRollout(rolloutPath, { deepFallback });
+
+    let metadata: Awaited<ReturnType<typeof stat>>;
+    try {
+      metadata = await stat(rolloutPath);
+    } catch {
+      return inspectRollout(rolloutPath, { deepFallback });
+    }
+
+    const cached = this.rolloutStateCache.get(rolloutPath);
+    if (
+      !options.force &&
+      cached?.size === metadata.size &&
+      cached.mtimeMs === metadata.mtimeMs &&
+      (!deepFallback || cached.deepInspected || cached.state.state !== "unknown")
+    ) {
+      cached.inspectedAt = Date.now();
+      return cached.state;
+    }
+
+    const state = await inspectRollout(rolloutPath, { deepFallback });
+    if (state.lastActivityAt == null) return state;
+    if (!this.rolloutStateCache.has(rolloutPath) && this.rolloutStateCache.size >= 128) {
+      const oldest = [...this.rolloutStateCache.entries()].sort(
+        (left, right) => left[1].inspectedAt - right[1].inspectedAt,
+      )[0];
+      if (oldest) this.rolloutStateCache.delete(oldest[0]);
+    }
+    this.rolloutStateCache.set(rolloutPath, {
+      size: metadata.size,
+      mtimeMs: metadata.mtimeMs,
+      inspectedAt: Date.now(),
+      deepInspected: deepFallback,
+      state,
+    });
+    return state;
   }
 
   private reconcileDesktopActivity(threadId: string, rollout: RolloutState): RolloutState {
@@ -1477,7 +1656,10 @@ export class CodexBridge extends EventEmitter {
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = setTimeout(() => {
           entry.timer = null;
-          void inspectRollout(rolloutPath, { deepFallback: false }).then((state) => {
+          void this.inspectRolloutState(rolloutPath, {
+            deepFallback: false,
+            force: true,
+          }).then((state) => {
             const reconciled = this.reconcileDesktopActivity(threadId, state);
             this.emitEvent("bridge/rolloutChanged", {
               threadId,

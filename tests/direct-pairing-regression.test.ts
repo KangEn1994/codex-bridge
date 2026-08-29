@@ -46,3 +46,14 @@ test("Windows release packages use bundled runtime entries", async () => {
   assert.match(host, /runtime\\host-server\.mjs/);
   assert.match(web, /runtime\\web-server\.mjs/);
 });
+
+test("the macOS service supervisors brace variables next to localized punctuation", async () => {
+  const [host, web] = await Promise.all([
+    readFile(new URL("../scripts/run-host.sh", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/run-web.sh", import.meta.url), "utf8"),
+  ]);
+  assert.match(host, /\$\{EXIT_CODE\}/);
+  assert.match(web, /\$\{EXIT_CODE\}/);
+  assert.doesNotMatch(host, /\$EXIT_CODE）/);
+  assert.doesNotMatch(web, /\$EXIT_CODE）/);
+});

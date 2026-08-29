@@ -43,6 +43,6 @@ while [[ ! -f "$STOP_SIGNAL" ]]; do
   fi
   EXIT_CODE=$?
   if [[ -f "$STOP_SIGNAL" ]]; then break; fi
-  echo "Codex Bridge Web 已退出（代码 $EXIT_CODE），2 秒后自动重启。" >&2
+  echo "Codex Bridge Web 已退出（代码 ${EXIT_CODE}），2 秒后自动重启。" >&2
   sleep 2
 done

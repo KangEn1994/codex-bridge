@@ -36,12 +36,12 @@ export function codexDesktopIpcPath(
 const methodVersions: Record<string, number> = {
   "thread-unarchived": 1,
   "thread-owner-discovery": 1,
-  "thread-follower-start-turn": 1,
+  "thread-follower-start-turn": 2,
   "thread-follower-interrupt-turn": 4,
   "thread-follower-update-thread-settings": 1,
 };
 
-function methodVersion(method: string, params: unknown) {
+export function codexDesktopIpcMethodVersion(method: string, params: unknown) {
   if (
     method === "thread-follower-interrupt-turn" &&
     params &&
@@ -119,12 +119,22 @@ export class CodexDesktopIpcClient {
       "thread-follower-start-turn",
       {
         conversationId,
-        turnStartParams: {
-          clientUserMessageId: randomUUID(),
-          input,
-          ...overrides,
+        // IPC v2 mirrors Desktop's internal startTurn envelope rather than
+        // accepting the flat v1 turnStartParams object.
+        turnStart: {
+          request: {
+            threadId: conversationId,
+            clientUserMessageId: randomUUID(),
+            input,
+            ...overrides,
+          },
+          context: {
+            inheritThreadSettings: true,
+            useAppServerPermissionDefault: false,
+            usePermissionSelection: false,
+            mcpAppModelContextAttachments: [],
+          },
         },
-        mcpAppModelContextAttachments: [],
       },
       { targetClientId: ownerClientId, timeoutMs: 60_000 },
     );
@@ -248,7 +258,7 @@ export class CodexDesktopIpcClient {
     return this.requestRaw(method, params, {
       ...options,
       sourceClientId: this.clientId,
-      version: methodVersion(method, params),
+      version: codexDesktopIpcMethodVersion(method, params),
     });
   }
 

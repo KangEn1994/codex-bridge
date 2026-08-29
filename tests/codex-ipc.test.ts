@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CodexDesktopIpcClient,
+  codexDesktopIpcMethodVersion,
   codexDesktopIpcPath,
   encodeIpcFrame,
 } from "../host/codex-ipc";
@@ -20,6 +21,30 @@ test("encodes Codex Desktop IPC frames with a little-endian JSON length", () => 
   const frame = encodeIpcFrame(message);
   assert.equal(frame.readUInt32LE(0), frame.length - 4);
   assert.deepEqual(JSON.parse(frame.subarray(4).toString("utf8")), message);
+});
+
+test("uses the current Desktop IPC versions for starting and interrupting turns", () => {
+  assert.equal(
+    codexDesktopIpcMethodVersion("thread-follower-start-turn", {
+      conversationId: "thread-1",
+    }),
+    2,
+  );
+  assert.equal(
+    codexDesktopIpcMethodVersion("thread-follower-interrupt-turn", {
+      conversationId: "thread-1",
+      mode: "user-stop",
+    }),
+    3,
+  );
+  assert.equal(
+    codexDesktopIpcMethodVersion("thread-follower-interrupt-turn", {
+      conversationId: "thread-1",
+      mode: "user-stop",
+      expectedTurnId: "turn-1",
+    }),
+    4,
+  );
 });
 
 test("announces an exact local thread so Codex Desktop can hydrate its conversation store", async () => {
@@ -92,14 +117,22 @@ test("passes model, effort, and permissions to a Desktop-owned turn", async () =
     permissions: ":workspace",
   });
 
-  const turnStartParams = captured?.turnStartParams as Record<string, unknown>;
-  assert.equal(turnStartParams.model, "gpt-test");
-  assert.equal(turnStartParams.effort, "high");
-  assert.equal(turnStartParams.permissions, ":workspace");
-  assert.deepEqual(turnStartParams.input, [
+  const turnStart = captured.turnStart as Record<string, unknown>;
+  const request = turnStart.request as Record<string, unknown>;
+  assert.equal(request.threadId, "thread-1");
+  assert.equal(request.model, "gpt-test");
+  assert.equal(request.effort, "high");
+  assert.equal(request.permissions, ":workspace");
+  assert.deepEqual(request.input, [
     { type: "text", text: "continue", text_elements: [] },
     { type: "localImage", path: "C:\\temp\\phone.webp" },
   ]);
+  assert.deepEqual(turnStart.context, {
+    inheritThreadSettings: true,
+    useAppServerPermissionDefault: false,
+    usePermissionSelection: false,
+    mcpAppModelContextAttachments: [],
+  });
 });
 
 test("updates Desktop thread settings before the next turn", async () => {
